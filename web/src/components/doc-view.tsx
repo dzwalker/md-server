@@ -13,7 +13,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { X, Star, Pin, Network } from 'lucide-react';
+import { X, Star, Pin, Network, ListTree } from 'lucide-react';
 import { useStore, type OpenDoc } from '@/state/store';
 import { api } from '@/lib/api';
 import type { Backlink } from '@/lib/types';
@@ -42,8 +42,10 @@ function SortableTab({ doc, active, onActivate, onClose }: TabProps) {
       {...attributes}
       {...listeners}
       className={cn(
-        'group flex shrink-0 cursor-grab items-center gap-2 border-r px-3 text-sm',
-        active ? 'bg-background text-foreground' : 'text-muted-foreground hover:bg-accent',
+        'group flex shrink-0 cursor-grab items-center gap-1.5 rounded-md px-3 py-1 text-sm',
+        active
+          ? 'bg-muted text-foreground'
+          : 'text-muted-foreground hover:bg-muted hover:text-foreground',
         isDragging && 'z-10 opacity-60',
       )}
     >
@@ -52,7 +54,7 @@ function SortableTab({ doc, active, onActivate, onClose }: TabProps) {
       </span>
       <button
         type="button"
-        className="rounded p-0.5 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100"
+        className="rounded p-0.5 text-muted-foreground opacity-0 hover:bg-muted-foreground/20 hover:text-foreground group-hover:opacity-100"
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation();
@@ -66,7 +68,12 @@ function SortableTab({ doc, active, onActivate, onClose }: TabProps) {
   );
 }
 
-export function DocView() {
+interface DocViewProps {
+  tocCollapsed: boolean;
+  onOpenToc: () => void;
+}
+
+export function DocView({ tocCollapsed, onOpenToc }: DocViewProps) {
   const {
     openDocs,
     activeDoc,
@@ -162,7 +169,7 @@ export function DocView() {
     <div className="flex h-full flex-col">
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
         <SortableContext items={openDocs.map((d) => d.path)} strategy={horizontalListSortingStrategy}>
-          <div className="flex h-9 shrink-0 items-stretch overflow-x-auto border-b">
+          <div className="flex shrink-0 items-center gap-1 overflow-x-auto px-2 py-1.5">
             {openDocs.map((d) => (
               <SortableTab
                 key={d.path}
@@ -176,8 +183,8 @@ export function DocView() {
         </SortableContext>
       </DndContext>
 
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b px-4">
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold">{title}</span>
+      <div className="flex shrink-0 items-center gap-1.5 px-5 pb-2 pt-3">
+        <span className="min-w-0 flex-1 truncate text-base font-semibold">{title}</span>
         {activeDoc && (
           <>
             <Button
@@ -199,6 +206,11 @@ export function DocView() {
               <Pin className={cn('h-4 w-4', pinned && 'fill-current')} />
             </Button>
           </>
+        )}
+        {tocCollapsed && (
+          <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={onOpenToc} title="打开目录">
+            <ListTree className="h-4 w-4" /> 目录
+          </Button>
         )}
         <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setGraphOpen((v) => !v)}>
           <Network className="h-4 w-4" /> 图谱

@@ -38,10 +38,7 @@ export function ExplorerPanel() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        资源管理器
-      </div>
-      <div className="flex items-center gap-2 border-b px-3 py-2">
+      <div className="flex shrink-0 items-center gap-2 px-3 pb-2 pt-1">
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -60,7 +57,7 @@ export function ExplorerPanel() {
       </div>
 
       {query.trim() ? (
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
           {loading ? (
             <div className="p-3 text-xs text-muted-foreground">搜索中…</div>
           ) : results.length === 0 ? (

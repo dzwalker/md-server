@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Group, Panel, Separator, type Layout } from 'react-resizable-panels';
+import { useEffect, useRef, useState } from 'react';
+import { Group, Panel, Separator, type Layout, type PanelImperativeHandle } from 'react-resizable-panels';
 import { StoreProvider } from '@/state/store';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import {
@@ -52,6 +52,10 @@ function Shell() {
   const [active, setActive] = useState<ActivityId>('explorer');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [tocCollapsed, setTocCollapsed] = useState(false);
+  const sidebarRef = useRef<PanelImperativeHandle | null>(null);
+  const tocRef = useRef<PanelImperativeHandle | null>(null);
   const { theme, toggle } = useTheme();
   const isMobile = useIsMobile();
 
@@ -65,6 +69,17 @@ function Shell() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  function handleLayoutChanged(layout: Layout) {
+    saveLayout(layout);
+    setSidebarCollapsed((layout.sidebar ?? 0) === 0);
+    setTocCollapsed((layout.toc ?? 0) === 0);
+  }
+
+  function handleActivityChange(id: ActivityId) {
+    setActive(id);
+    if (sidebarCollapsed) sidebarRef.current?.expand();
+  }
 
   const layout = isMobile ? (
     <TooltipProvider>
@@ -81,14 +96,14 @@ function Shell() {
           />
         </div>
         <div className="flex min-w-0 flex-1 flex-col">
-          <DocView />
+          <DocView tocCollapsed={false} onOpenToc={() => {}} />
         </div>
         <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
           <SheetContent side="left" className="w-72 p-0">
             <SheetHeader className="sr-only">
               <SheetTitle>侧栏</SheetTitle>
             </SheetHeader>
-            <Sidebar active={active} />
+            <Sidebar active={active} onCollapse={() => setSidebarOpen(false)} />
           </SheetContent>
         </Sheet>
       </div>
@@ -97,24 +112,38 @@ function Shell() {
     <TooltipProvider>
       <div className="flex h-screen w-full overflow-hidden">
         <div className="w-12 shrink-0">
-          <ActivityBar active={active} onChange={setActive} theme={theme} onToggleTheme={toggle} />
+          <ActivityBar active={active} onChange={handleActivityChange} theme={theme} onToggleTheme={toggle} />
         </div>
         <Group
           orientation="horizontal"
           className="min-w-0 flex-1"
           defaultLayout={loadLayout()}
-          onLayoutChanged={saveLayout}
+          onLayoutChanged={handleLayoutChanged}
         >
-          <Panel id="sidebar" minSize="15" maxSize="40">
-            <Sidebar active={active} />
+          <Panel
+            id="sidebar"
+            minSize="15"
+            maxSize="40"
+            collapsible
+            collapsedSize={0}
+            panelRef={sidebarRef}
+          >
+            <Sidebar active={active} onCollapse={() => sidebarRef.current?.collapse()} />
           </Panel>
           <Separator className={HANDLE_CLASS} />
           <Panel id="main" minSize="30">
-            <DocView />
+            <DocView tocCollapsed={tocCollapsed} onOpenToc={() => tocRef.current?.expand()} />
           </Panel>
           <Separator className={HANDLE_CLASS} />
-          <Panel id="toc" minSize="12" maxSize="30" collapsible collapsedSize={0}>
-            <TocPanel />
+          <Panel
+            id="toc"
+            minSize="12"
+            maxSize="30"
+            collapsible
+            collapsedSize={0}
+            panelRef={tocRef}
+          >
+            <TocPanel onCollapse={() => tocRef.current?.collapse()} />
           </Panel>
         </Group>
       </div>

@@ -18,7 +18,7 @@ interface ActivityBarProps {
 
 export function ActivityBar({ active, onChange, theme, onToggleTheme }: ActivityBarProps) {
   return (
-    <div className="flex h-full w-full flex-col items-center gap-1 border-r bg-muted/40 py-2">
+    <div className="flex h-full w-full flex-col items-center gap-1 border-r bg-sidebar py-2">
       {ACTIVITIES.map((a) => {
         const Icon = a.icon;
         const isActive = a.id === active;

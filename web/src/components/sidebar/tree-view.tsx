@@ -75,28 +75,22 @@ export function TreeView() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-1 border-b px-2 py-1">
-        <Button variant="ghost" size="sm" className={btn} onClick={() => expandToLevel(1)} title="展开到一级">
+      <div className="flex shrink-0 items-center gap-0.5 px-3 pb-1 text-xs text-muted-foreground">
+        <span className="mr-1">层级:</span>
+        <Button variant="ghost" size="sm" className={btn} onClick={() => expandToLevel(1)}>
           1
         </Button>
-        <Button variant="ghost" size="sm" className={btn} onClick={() => expandToLevel(2)} title="展开到二级">
+        <Button variant="ghost" size="sm" className={btn} onClick={() => expandToLevel(2)}>
           2
         </Button>
-        <Button variant="ghost" size="sm" className={btn} onClick={() => expandToLevel(3)} title="展开到三级">
+        <Button variant="ghost" size="sm" className={btn} onClick={() => expandToLevel(3)}>
           3
         </Button>
-        <Button variant="ghost" size="sm" className={btn} onClick={() => treeRef.current?.openAll()} title="全部展开">
+        <Button variant="ghost" size="sm" className={btn} onClick={() => treeRef.current?.openAll()}>
           a
         </Button>
-        <div className="flex-1" />
-        <Button variant="ghost" size="sm" className={btn} onClick={() => treeRef.current?.closeAll()}>
-          收起
-        </Button>
-        <Button variant="ghost" size="sm" className={btn} onClick={() => treeRef.current?.openAll()}>
-          打开
-        </Button>
       </div>
-      <div ref={ref} className="min-h-0 flex-1">
+      <div ref={ref} className="min-h-0 flex-1 overflow-x-hidden">
         {height > 0 && (
           <Tree
             ref={treeRef}

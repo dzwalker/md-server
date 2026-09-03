@@ -59,12 +59,9 @@ export function SpacesPanel() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        空间管理
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         {roots.map((r, i) => (
-          <div key={i} className="flex items-center gap-2 border-b px-3 py-1.5">
+          <div key={i} className="flex items-center gap-2 px-3 py-1.5">
             <Input
               value={r.url}
               onChange={(e) => patch(i, { url: e.target.value })}
@@ -91,7 +88,7 @@ export function SpacesPanel() {
           </div>
         ))}
       </div>
-      <div className="flex gap-2 border-t px-3 py-2">
+      <div className="flex shrink-0 gap-2 px-3 py-2">
         <Input
           value={newUrl}
           onChange={(e) => setNewUrl(e.target.value)}
@@ -108,7 +105,7 @@ export function SpacesPanel() {
           添加
         </Button>
       </div>
-      <div className="border-t px-3 py-2 text-xs text-muted-foreground">
+      <div className="shrink-0 px-3 pb-2 text-xs text-muted-foreground">
         修改后自动保存并重载索引。目录需已挂载到容器内。
       </div>
     </div>

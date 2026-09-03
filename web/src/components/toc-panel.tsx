@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, List, PanelRightClose } from 'lucide-react';
 import { useStore } from '@/state/store';
 import type { Heading } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -37,7 +37,7 @@ function flatten(nodes: TocNode[]): TocNode[] {
   return out;
 }
 
-export function TocPanel() {
+export function TocPanel({ onCollapse }: { onCollapse: () => void }) {
   const { activeRender, activeDoc } = useStore();
   const headings = activeRender?.headings || [];
   const tree = useMemo(() => buildToc(headings), [headings]);
@@ -79,9 +79,6 @@ export function TocPanel() {
 
   function expandToLevel(n: number) {
     setCollapsed(new Set(flat.filter((x) => x.children.length && x.level >= n).map((x) => x.id)));
-  }
-  function collapseAll() {
-    setCollapsed(new Set(flat.filter((x) => x.children.length).map((x) => x.id)));
   }
   function openAll() {
     setCollapsed(new Set());
@@ -133,11 +130,21 @@ export function TocPanel() {
   const btn = 'h-6 px-1.5 text-xs';
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="border-b px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        目录
+    <div className="flex h-full flex-col bg-sidebar">
+      <div className="flex shrink-0 items-center gap-2 px-3 pb-1.5 pt-2.5">
+        <List className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">目录</span>
+        <button
+          type="button"
+          onClick={onCollapse}
+          title="收起目录"
+          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <PanelRightClose className="h-4 w-4" />
+        </button>
       </div>
-      <div className="flex items-center gap-1 border-b px-2 py-1">
+      <div className="flex shrink-0 items-center gap-0.5 px-3 pb-1 text-xs text-muted-foreground">
+        <span className="mr-1">层级:</span>
         <Button variant="ghost" size="sm" className={btn} onClick={() => expandToLevel(1)}>
           1
         </Button>
@@ -150,15 +157,8 @@ export function TocPanel() {
         <Button variant="ghost" size="sm" className={btn} onClick={openAll}>
           a
         </Button>
-        <div className="flex-1" />
-        <Button variant="ghost" size="sm" className={btn} onClick={collapseAll}>
-          收起
-        </Button>
-        <Button variant="ghost" size="sm" className={btn} onClick={openAll}>
-          打开
-        </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-1">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-1">
         {!headings.length ? (
           <div className="p-3 text-xs text-muted-foreground">无标题</div>
         ) : (

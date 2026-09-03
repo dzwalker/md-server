@@ -47,10 +47,7 @@ export function TagsPanel() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        标签
-      </div>
-      <div className="flex flex-wrap gap-1.5 border-b px-3 py-2">
+      <div className="flex shrink-0 flex-wrap gap-1.5 px-3 pb-2 pt-1">
         {tags.map((t) => (
           <Badge
             key={t.tag}
@@ -62,7 +59,7 @@ export function TagsPanel() {
           </Badge>
         ))}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         {!activeTag ? (
           <div className="p-3 text-xs text-muted-foreground">选择一个标签筛选文档</div>
         ) : results.length === 0 ? (
