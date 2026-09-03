@@ -1,0 +1,45 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+out/
+*.tsbuildinfo
+
+# environment / secrets
+.env
+.env.*
+*.local
+
+# runtime personal config (multi-space roots)
+roots.json
+
+# personal helper scripts (not part of the project)
+backup-md-server.sh
+
+# personal docker-compose (use docker-compose.example.yml)
+docker-compose.yml
+docker-compose.override.yml
+
+# databases / index (runtime, lives under /data)
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+/data/
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~

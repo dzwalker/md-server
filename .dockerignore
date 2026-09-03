@@ -1,0 +1,13 @@
+node_modules
+.git
+dist
+roots.json
+backup-md-server.sh
+docker-compose.yml
+docker-compose.override.yml
+.env
+.env.*
+*.db
+*.db-wal
+*.db-shm
+*.log

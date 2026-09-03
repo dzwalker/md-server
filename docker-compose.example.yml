@@ -1,0 +1,24 @@
+services:
+  md-server:
+    build: .
+    container_name: md-server
+    restart: unless-stopped
+    environment:
+      - MD_PORT=3001
+      # 文档空间映射（url 前缀 -> 容器内目录），改成你自己的
+      - MD_ROOTS=[{"url":"/docs","dir":"/data/docs"}]
+    ports:
+      - "3001:3001"
+      # MCP SSE 端口（如需对外暴露再取消注释）
+      # - "3002:3002"
+    volumes:
+      # 把本地文档目录挂到 /data/docs（与 MD_ROOTS 对应）
+      - ./data/docs:/data/docs
+      # 多空间热加载配置（可选）
+      - ./roots.json:/app/roots.json
+      - md_hf_cache:/root/.cache/huggingface
+      - md_index:/data/index
+
+volumes:
+  md_hf_cache:
+  md_index:
