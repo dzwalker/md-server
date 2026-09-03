@@ -146,3 +146,6 @@
 .md-content mark { background: #ffe58f; color: #000; padding: 0 1px; border-radius: 2px; }
 .md-content a { color: #0969da; }
 .dark .md-content a { color: #6cb6ff; }
+
+/* react-arborist 树：行不撑出水平滚动条（覆盖其 min-width: max-content） */
+[role="treeitem"] { min-width: 0 !important; }

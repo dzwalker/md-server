@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Tree, type NodeRendererProps, type TreeApi } from 'react-arborist';
+import { Tree, type NodeApi, type NodeRendererProps, type TreeApi } from 'react-arborist';
 import { ChevronRight, FileText, Folder, FolderOpen } from 'lucide-react';
 import { api } from '@/lib/api';
 import type { TreeNode } from '@/lib/types';
@@ -65,10 +65,16 @@ export function TreeView() {
   const expandToLevel = useCallback((n: number) => {
     const t = treeRef.current;
     if (!t) return;
-    t.openAll();
-    t.visibleNodes.forEach((node) => {
-      if (node.isInternal && node.level >= n - 1) node.close();
-    });
+    const walk = (nodes: NodeApi<TreeNode>[]) => {
+      for (const node of nodes) {
+        if (node.isInternal) {
+          if (node.level >= n - 1) node.close();
+          else node.open();
+          walk(node.children || []);
+        }
+      }
+    };
+    walk(t.root.children || []);
   }, []);
 
   const btn = 'h-6 px-1.5 text-xs';
