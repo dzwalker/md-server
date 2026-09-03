@@ -14,7 +14,14 @@ const require = createRequire(import.meta.url);
 const chokidar = require('chokidar');
 
 const app = Fastify({ logger: false });
-app.register(fastifyStatic, { root: path.join(process.cwd(), 'public') });
+// 静态媒体资源（katex / mermaid / highlight）——始终可用
+app.register(fastifyStatic, { root: path.join(process.cwd(), 'public', 'media'), prefix: '/media/', decorateReply: false });
+// 前端构建产物（web/dist）——生产环境
+const webDist = path.join(process.cwd(), 'web', 'dist');
+const webDistIndex = path.join(webDist, 'index.html');
+if (fs.existsSync(webDistIndex)) {
+  app.register(fastifyStatic, { root: webDist, decorateReply: false });
+}
 
 app.get('/healthz', async () => ({ status: 'ok', roots: ROOTS, fileCount: scanAll().length, index: indexStats() }));
 
@@ -155,7 +162,13 @@ app.addHook('onSend', async (_req, reply) => { reply.header('Cache-Control', 'no
 
 app.setNotFoundHandler((req, reply) => {
   if (req.url.startsWith('/api/')) return reply.code(404).send({ error: 'not found' });
-  return reply.sendFile('index.html');
+  if (fs.existsSync(webDistIndex)) {
+    return reply.type('text/html').send(fs.readFileSync(webDistIndex, 'utf8'));
+  }
+  // 未构建前端时回退旧 public/index.html（开发直连后端）
+  const legacy = path.join(process.cwd(), 'public', 'index.html');
+  if (fs.existsSync(legacy)) return reply.type('text/html').send(fs.readFileSync(legacy, 'utf8'));
+  return reply.code(404).send('not found');
 });
 
 // 启动时建索引
