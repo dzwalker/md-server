@@ -80,6 +80,8 @@ interface StoreValue {
   isPinned: (path: string) => boolean;
   dataVersion: number;
   refreshData: () => void;
+  mdTheme: string;
+  setMdTheme: (t: string) => void;
 }
 
 const StoreContext = createContext<StoreValue | null>(null);
@@ -93,6 +95,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [activeRender, setActiveRender] = useState<RenderResult | null>(null);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [dataVersion, setDataVersion] = useState(0);
+  const [mdTheme, setMdThemeState] = useState<string>(() => {
+    if (typeof window === 'undefined') return 'prose';
+    return localStorage.getItem('md-content-theme') || 'prose';
+  });
+  const setMdTheme = useCallback((t: string) => {
+    setMdThemeState(t);
+    try {
+      localStorage.setItem('md-content-theme', t);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const refreshFavorites = useCallback(async () => {
     try {
@@ -178,6 +192,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       isPinned,
       dataVersion,
       refreshData,
+      mdTheme,
+      setMdTheme,
     }),
     [
       docs,
@@ -195,6 +211,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       isPinned,
       dataVersion,
       refreshData,
+      mdTheme,
+      setMdTheme,
     ],
   );
 

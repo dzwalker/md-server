@@ -129,23 +129,57 @@
     }
 }
 
+/* ==== Markdown 主题（可在「设置」切换）==== */
+.md-theme-prose { --md-bg: var(--background); --md-fg: var(--foreground); --md-heading: var(--foreground); --md-accent: #0969da; --md-muted: var(--muted-foreground); --md-quote: var(--muted); --md-quote-border: var(--border); --md-code-bg: var(--muted); --md-link-underline: none; }
+.dark .md-theme-prose { --md-accent: #6cb6ff; }
+
+.md-theme-claude { --md-bg: #f7f4ee; --md-fg: #35322e; --md-heading: #201d19; --md-accent: #c15f3c; --md-muted: #8a8478; --md-quote: #f0ebe2; --md-quote-border: #e0d6c4; --md-code-bg: #efeae0; --md-link-underline: none; }
+.dark .md-theme-claude { --md-bg: #2a2622; --md-fg: #e8e3da; --md-heading: #f4efe6; --md-accent: #e08a64; --md-muted: #a39b8e; --md-quote: #332e28; --md-quote-border: #4a4238; --md-code-bg: #332e28; }
+
+.md-theme-clear-ink { --md-bg: #fdfdfb; --md-fg: #1a1a1a; --md-heading: #000000; --md-accent: #0b57d0; --md-muted: #6b6b6b; --md-quote: #f5f5f2; --md-quote-border: #d9d9d5; --md-code-bg: #f3f3f0; --md-link-underline: underline; }
+.dark .md-theme-clear-ink { --md-bg: #17181a; --md-fg: #e6e6e3; --md-heading: #ffffff; --md-accent: #8ab4f8; --md-muted: #9aa0a6; --md-quote: #232427; --md-quote-border: #3c3f42; --md-code-bg: #222326; }
+
+.md-theme-esther { --md-bg: #fbf6ee; --md-fg: #3d3a34; --md-heading: #2f5d8a; --md-accent: #2f5d8a; --md-muted: #8a8478; --md-quote: #f5eee0; --md-quote-border: #e6c46a; --md-code-bg: #f2ecdf; --md-link-underline: none; }
+.dark .md-theme-esther { --md-bg: #1c2030; --md-fg: #d7dae3; --md-heading: #8ab4f8; --md-accent: #8ab4f8; --md-muted: #8f95a6; --md-quote: #262b3d; --md-quote-border: #e6c46a; --md-code-bg: #262b3d; }
+
+/* 内容区背景/前景跟随主题 */
+.md-theme-prose, .md-theme-claude, .md-theme-clear-ink, .md-theme-esther {
+  background: var(--md-bg);
+  color: var(--md-fg);
+}
+
 /* 渲染内容（服务端 Markdown HTML）样式 */
-.md-content { line-height: 1.6; font-size: 15px; word-break: break-word; }
+.md-content { line-height: 1.7; font-size: 15px; word-break: break-word; color: var(--md-fg, var(--foreground)); }
 .md-content > :first-child { margin-top: 0; }
-.md-content h1, .md-content h2, .md-content h3 { border-bottom: 1px solid var(--border); padding-bottom: 0.2em; margin: 1.2em 0 0.6em; }
-.md-content h4, .md-content h5, .md-content h6 { margin: 1em 0 0.4em; }
+.md-content h1, .md-content h2, .md-content h3, .md-content h4, .md-content h5, .md-content h6 {
+  color: var(--md-heading, var(--foreground));
+  margin: 1.2em 0 0.6em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.md-content h1 { font-size: 1.7em; }
+.md-content h2 { font-size: 1.4em; }
+.md-content h3 { font-size: 1.2em; }
+.md-content h4 { font-size: 1.05em; }
+.md-content h5, .md-content h6 { font-size: 1em; }
 .md-content p { margin: 0.5em 0; }
 .md-content ul, .md-content ol { padding-left: 1.5em; margin: 0.5em 0; }
-.md-content pre { background: var(--muted); padding: 12px; border-radius: 6px; overflow-x: auto; }
+.md-content pre { background: var(--md-code-bg, var(--muted)); padding: 12px; border-radius: 6px; overflow-x: auto; }
 .md-content code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em; }
 .md-content table { border-collapse: collapse; }
 .md-content th, .md-content td { border: 1px solid var(--border); padding: 5px 10px; }
 .md-content img { max-width: 100%; }
-.md-content blockquote { border-left: 4px solid var(--border); margin-left: 0; padding-left: 14px; color: var(--muted-foreground); }
+.md-content blockquote {
+  background: var(--md-quote, var(--muted));
+  border-left: 4px solid var(--md-quote-border, var(--border));
+  margin-left: 0;
+  padding: 8px 14px;
+  border-radius: 0 6px 6px 0;
+  color: var(--md-fg, var(--foreground));
+}
 .md-content .katex-block { display: block; overflow-x: auto; padding: 4px 0; }
 .md-content mark { background: #ffe58f; color: #000; padding: 0 1px; border-radius: 2px; }
-.md-content a { color: #0969da; }
-.dark .md-content a { color: #6cb6ff; }
+.md-content a { color: var(--md-accent, #0969da); text-decoration: var(--md-link-underline, none); }
 
 /* react-arborist 树：行不撑出水平滚动条（覆盖其 min-width: max-content） */
 [role="treeitem"] { min-width: 0 !important; }

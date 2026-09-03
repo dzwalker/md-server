@@ -88,6 +88,7 @@ export function DocView({ tocCollapsed, onOpenToc }: DocViewProps) {
     setFavorite,
     isFavorite,
     isPinned,
+    mdTheme,
   } = useStore();
 
   const contentRef = useRef<HTMLDivElement>(null);
@@ -217,7 +218,7 @@ export function DocView({ tocCollapsed, onOpenToc }: DocViewProps) {
         </Button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className={cn('min-h-0 flex-1 overflow-auto', !graphOpen && 'md-theme-' + mdTheme)}>
         {graphOpen ? (
           <GraphView
             onOpen={(path, title) => {

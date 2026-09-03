@@ -5,6 +5,7 @@ import { OpenedPanel } from './sidebar/opened-panel';
 import { TagsPanel } from './sidebar/tags-panel';
 import { FavoritesPanel } from './sidebar/favorites-panel';
 import { SpacesPanel } from './sidebar/spaces-panel';
+import { SettingsPanel } from './sidebar/settings-panel';
 
 interface SidebarProps {
   active: ActivityId;
@@ -21,6 +22,8 @@ function renderPanel(active: ActivityId) {
       return <FavoritesPanel />;
     case 'spaces':
       return <SpacesPanel />;
+    case 'settings':
+      return <SettingsPanel />;
     case 'explorer':
     default:
       return <ExplorerPanel />;
