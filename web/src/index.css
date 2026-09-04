@@ -183,3 +183,7 @@
 
 /* react-arborist 树：行不撑出水平滚动条（覆盖其 min-width: max-content） */
 [role="treeitem"] { min-width: 0 !important; }
+
+/* 隐藏横向滚动条（保留滚动能力，用于 tab 栏） */
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

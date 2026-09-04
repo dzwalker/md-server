@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils';
 import { renderExtras, highlightContent } from '@/lib/markdown-extras';
 import { Button } from '@/components/ui/button';
 import { GraphView } from './graph-view';
+import { TocPanel } from './toc-panel';
 
 interface TabProps {
   doc: OpenDoc;
@@ -41,6 +42,7 @@ function SortableTab({ doc, active, onActivate, onClose }: TabProps) {
       style={style}
       {...attributes}
       {...listeners}
+      data-active={active || undefined}
       className={cn(
         'group flex shrink-0 cursor-grab items-center gap-1.5 rounded-md px-3 py-1 text-sm',
         active
@@ -68,12 +70,7 @@ function SortableTab({ doc, active, onActivate, onClose }: TabProps) {
   );
 }
 
-interface DocViewProps {
-  tocCollapsed: boolean;
-  onOpenToc: () => void;
-}
-
-export function DocView({ tocCollapsed, onOpenToc }: DocViewProps) {
+export function DocView() {
   const {
     openDocs,
     activeDoc,
@@ -90,9 +87,11 @@ export function DocView({ tocCollapsed, onOpenToc }: DocViewProps) {
   } = useStore();
 
   const contentRef = useRef<HTMLDivElement>(null);
+  const tabsBarRef = useRef<HTMLDivElement>(null);
   const [backlinks, setBacklinks] = useState<Backlink[]>([]);
   const [outlinks, setOutlinks] = useState<string[]>([]);
   const [graphOpen, setGraphOpen] = useState(false);
+  const [tocOpen, setTocOpen] = useState(true);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -151,6 +150,14 @@ export function DocView({ tocCollapsed, onOpenToc }: DocViewProps) {
     highlightContent(el, activeQuery);
   }, [activeRender, activeQuery]);
 
+  // 切换文档时，把当前 tab 滚动到可见位置
+  useEffect(() => {
+    const bar = tabsBarRef.current;
+    if (!bar) return;
+    const active = bar.querySelector<HTMLElement>('[data-active="true"]');
+    active?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
+  }, [activeDoc]);
+
   function onDragEnd(e: DragEndEvent) {
     const { active, over } = e;
     if (over && active.id !== over.id) {
@@ -167,7 +174,13 @@ export function DocView({ tocCollapsed, onOpenToc }: DocViewProps) {
     <div className="flex h-full flex-col">
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
         <SortableContext items={openDocs.map((d) => d.path)} strategy={horizontalListSortingStrategy}>
-          <div className="flex shrink-0 items-center gap-1 overflow-x-auto px-2 py-1.5">
+          <div
+            ref={tabsBarRef}
+            onWheel={(e) => {
+              if (e.deltaY !== 0) e.currentTarget.scrollLeft += e.deltaY;
+            }}
+            className="no-scrollbar flex shrink-0 items-center gap-1 overflow-x-auto px-2 py-1.5"
+          >
             {openDocs.map((d) => (
               <SortableTab
                 key={d.path}
@@ -184,23 +197,25 @@ export function DocView({ tocCollapsed, onOpenToc }: DocViewProps) {
       <div className="flex shrink-0 items-center gap-1.5 px-5 pb-2 pt-3">
         <span className="min-w-0 flex-1 truncate text-base font-semibold">{title}</span>
         {activeDoc && (
-          <>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={cn('h-8 w-8', !fav && 'text-muted-foreground')}
-              onClick={() => toggleFavorite(activeDoc)}
-              title="收藏 / 取消收藏"
-            >
-              <Star className={cn('h-4 w-4', fav && 'fill-current text-yellow-500')} />
-            </Button>
-          </>
-        )}
-        {tocCollapsed && (
-          <Button variant="ghost" size="sm" className="h-8 gap-1.5" onClick={onOpenToc} title="打开目录">
-            <ListTree className="h-4 w-4" /> 目录
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn('h-8 w-8', !fav && 'text-muted-foreground')}
+            onClick={() => toggleFavorite(activeDoc)}
+            title="收藏 / 取消收藏"
+          >
+            <Star className={cn('h-4 w-4', fav && 'fill-current text-yellow-500')} />
           </Button>
         )}
+        <Button
+          variant="ghost"
+          size="sm"
+          className={cn('hidden h-8 gap-1.5 lg:inline-flex', tocOpen && 'bg-muted text-foreground')}
+          onClick={() => setTocOpen((v) => !v)}
+          title="目录"
+        >
+          <ListTree className="h-4 w-4" /> 目录
+        </Button>
         <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setGraphOpen((v) => !v)}>
           <Network className="h-4 w-4" /> 图谱
         </Button>
@@ -215,37 +230,44 @@ export function DocView({ tocCollapsed, onOpenToc }: DocViewProps) {
             }}
           />
         ) : activeDoc ? (
-          <div className="mx-auto max-w-3xl px-6 py-6">
-            <div
-              ref={contentRef}
-              className="md-content"
-              dangerouslySetInnerHTML={{ __html: activeRender?.html || '' }}
-            />
-            {backlinks.length > 0 && (
-              <div className="mt-8 border-t pt-4">
-                <h2 className="text-sm font-semibold">🔗 反向链接 ({backlinks.length})</h2>
-                <ul className="mt-2 space-y-1 text-sm">
-                  {backlinks.map((b) => (
-                    <li key={b.path}>
-                      <button className="text-primary hover:underline" onClick={() => openDoc(b.path, b.title)}>
-                        {b.title || b.path}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {outlinks.length > 0 && (
-              <div className="mt-6">
-                <h2 className="text-sm font-semibold">↗ 出链 ({outlinks.length})</h2>
-                <ul className="mt-2 space-y-1 text-sm">
-                  {outlinks.map((n) => (
-                    <li key={n} className="text-muted-foreground">
-                      {n}
-                    </li>
-                  ))}
-                </ul>
-              </div>
+          <div className="mx-auto flex w-full max-w-5xl items-start gap-6 px-6 py-6">
+            <div className="min-w-0 flex-1">
+              <div
+                ref={contentRef}
+                className="md-content"
+                dangerouslySetInnerHTML={{ __html: activeRender?.html || '' }}
+              />
+              {backlinks.length > 0 && (
+                <div className="mt-8 border-t pt-4">
+                  <h2 className="text-sm font-semibold">🔗 反向链接 ({backlinks.length})</h2>
+                  <ul className="mt-2 space-y-1 text-sm">
+                    {backlinks.map((b) => (
+                      <li key={b.path}>
+                        <button className="text-primary hover:underline" onClick={() => openDoc(b.path, b.title)}>
+                          {b.title || b.path}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {outlinks.length > 0 && (
+                <div className="mt-6">
+                  <h2 className="text-sm font-semibold">↗ 出链 ({outlinks.length})</h2>
+                  <ul className="mt-2 space-y-1 text-sm">
+                    {outlinks.map((n) => (
+                      <li key={n} className="text-muted-foreground">
+                        {n}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+            {tocOpen && (
+              <aside className="sticky top-6 hidden w-56 shrink-0 self-start lg:block">
+                <TocPanel onClose={() => setTocOpen(false)} />
+              </aside>
             )}
           </div>
         ) : (

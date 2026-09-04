@@ -37,7 +37,7 @@ function flatten(nodes: TocNode[]): TocNode[] {
   return out;
 }
 
-export function TocPanel({ onCollapse }: { onCollapse: () => void }) {
+export function TocPanel({ onClose }: { onClose: () => void }) {
   const { activeRender, activeDoc } = useStore();
   const headings = activeRender?.headings || [];
   const tree = useMemo(() => buildToc(headings), [headings]);
@@ -130,13 +130,13 @@ export function TocPanel({ onCollapse }: { onCollapse: () => void }) {
   const btn = 'h-6 px-1.5 text-xs';
 
   return (
-    <div className="flex h-full flex-col bg-sidebar">
-      <div className="flex shrink-0 items-center gap-2 px-3 pb-1.5 pt-2.5">
+    <div className="flex max-h-[calc(100vh-9rem)] flex-col rounded-lg border bg-sidebar">
+      <div className="flex shrink-0 items-center gap-2 px-3 pb-1 pt-2">
         <List className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate text-sm font-medium">目录</span>
         <button
           type="button"
-          onClick={onCollapse}
+          onClick={onClose}
           title="收起目录"
           className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
         >

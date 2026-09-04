@@ -11,14 +11,13 @@ import {
 import { ActivityBar } from '@/components/activity-bar';
 import { Sidebar } from '@/components/sidebar';
 import { DocView } from '@/components/doc-view';
-import { TocPanel } from '@/components/toc-panel';
 import { CommandPalette } from '@/components/command-palette';
 import { useTheme } from '@/hooks/use-theme';
 import { useIsMobile } from '@/hooks/use-is-mobile';
 import type { ActivityId } from '@/lib/activities';
 
 const LAYOUT_KEY = 'md-server-layout';
-const DEFAULT_LAYOUT: Layout = { sidebar: 20, main: 62, toc: 18 };
+const DEFAULT_LAYOUT: Layout = { sidebar: 20, main: 80 };
 
 function loadLayout(): Layout {
   try {
@@ -53,9 +52,7 @@ function Shell() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [tocCollapsed, setTocCollapsed] = useState(false);
   const sidebarRef = useRef<PanelImperativeHandle | null>(null);
-  const tocRef = useRef<PanelImperativeHandle | null>(null);
   const { theme, toggle } = useTheme();
   const isMobile = useIsMobile();
 
@@ -73,7 +70,6 @@ function Shell() {
   function handleLayoutChanged(layout: Layout) {
     saveLayout(layout);
     setSidebarCollapsed((layout.sidebar ?? 0) === 0);
-    setTocCollapsed((layout.toc ?? 0) === 0);
   }
 
   function handleActivityChange(id: ActivityId) {
@@ -96,7 +92,7 @@ function Shell() {
           />
         </div>
         <div className="flex min-w-0 flex-1 flex-col">
-          <DocView tocCollapsed={false} onOpenToc={() => {}} />
+          <DocView />
         </div>
         <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
           <SheetContent side="left" className="w-72 p-0">
@@ -132,18 +128,7 @@ function Shell() {
           </Panel>
           <Separator className={HANDLE_CLASS} />
           <Panel id="main" minSize="30">
-            <DocView tocCollapsed={tocCollapsed} onOpenToc={() => tocRef.current?.expand()} />
-          </Panel>
-          <Separator className={HANDLE_CLASS} />
-          <Panel
-            id="toc"
-            minSize="12"
-            maxSize="30"
-            collapsible
-            collapsedSize={0}
-            panelRef={tocRef}
-          >
-            <TocPanel onCollapse={() => tocRef.current?.collapse()} />
+            <DocView />
           </Panel>
         </Group>
       </div>
