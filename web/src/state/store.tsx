@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { api } from '@/lib/api';
 import type { Favorite, RenderResult } from '@/lib/types';
+import { TOC_WIDTH_DEFAULT, TOC_WIDTH_MAX, TOC_WIDTH_MIN } from '@/lib/toc';
 
 export interface OpenDoc {
   path: string;
@@ -82,6 +83,8 @@ interface StoreValue {
   refreshData: () => void;
   mdTheme: string;
   setMdTheme: (t: string) => void;
+  tocWidth: number;
+  setTocWidth: (n: number) => void;
 }
 
 const StoreContext = createContext<StoreValue | null>(null);
@@ -103,6 +106,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setMdThemeState(t);
     try {
       localStorage.setItem('md-content-theme', t);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const [tocWidth, setTocWidthState] = useState<number>(() => {
+    if (typeof window === 'undefined') return TOC_WIDTH_DEFAULT;
+    const v = Number(localStorage.getItem('md-toc-width'));
+    return v >= TOC_WIDTH_MIN && v <= TOC_WIDTH_MAX ? v : TOC_WIDTH_DEFAULT;
+  });
+  const setTocWidth = useCallback((n: number) => {
+    const v = Math.min(TOC_WIDTH_MAX, Math.max(TOC_WIDTH_MIN, Math.round(n) || TOC_WIDTH_MIN));
+    setTocWidthState(v);
+    try {
+      localStorage.setItem('md-toc-width', String(v));
     } catch {
       /* ignore */
     }
@@ -194,6 +212,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refreshData,
       mdTheme,
       setMdTheme,
+      tocWidth,
+      setTocWidth,
     }),
     [
       docs,
@@ -213,6 +233,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refreshData,
       mdTheme,
       setMdTheme,
+      tocWidth,
+      setTocWidth,
     ],
   );
 

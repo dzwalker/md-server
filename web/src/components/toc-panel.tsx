@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { ChevronRight, List, PanelRightClose } from 'lucide-react';
+import { ChevronRight, List } from 'lucide-react';
 import { useStore } from '@/state/store';
 import type { Heading } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -37,7 +37,7 @@ function flatten(nodes: TocNode[]): TocNode[] {
   return out;
 }
 
-export function TocPanel({ onClose }: { onClose: () => void }) {
+export function TocPanel() {
   const { activeRender, activeDoc } = useStore();
   const headings = activeRender?.headings || [];
   const tree = useMemo(() => buildToc(headings), [headings]);
@@ -134,14 +134,6 @@ export function TocPanel({ onClose }: { onClose: () => void }) {
       <div className="flex shrink-0 items-center gap-2 px-3 pb-1 pt-2">
         <List className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate text-sm font-medium">目录</span>
-        <button
-          type="button"
-          onClick={onClose}
-          title="收起目录"
-          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <PanelRightClose className="h-4 w-4" />
-        </button>
       </div>
       <div className="flex shrink-0 items-center gap-0.5 px-3 pb-1 text-xs text-muted-foreground">
         <span className="mr-1">层级:</span>

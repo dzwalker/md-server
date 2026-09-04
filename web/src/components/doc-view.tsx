@@ -20,8 +20,15 @@ import type { Backlink } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { renderExtras, highlightContent } from '@/lib/markdown-extras';
 import { Button } from '@/components/ui/button';
+import { useElementSize } from '@/hooks/use-element-size';
 import { GraphView } from './graph-view';
 import { TocPanel } from './toc-panel';
+import {
+  MD_MAX_WIDTH,
+  PADDING_X,
+  TOC_FLOAT_BREAKPOINT,
+  TOC_GAP,
+} from '@/lib/toc';
 
 interface TabProps {
   doc: OpenDoc;
@@ -84,10 +91,12 @@ export function DocView() {
     toggleFavorite,
     isFavorite,
     mdTheme,
+    tocWidth,
   } = useStore();
 
   const contentRef = useRef<HTMLDivElement>(null);
   const tabsBarRef = useRef<HTMLDivElement>(null);
+  const { ref: contentAreaRef, width: contentWidth } = useElementSize<HTMLDivElement>();
   const [backlinks, setBacklinks] = useState<Backlink[]>([]);
   const [outlinks, setOutlinks] = useState<string[]>([]);
   const [graphOpen, setGraphOpen] = useState(false);
@@ -167,6 +176,21 @@ export function DocView() {
     }
   }
 
+  // TOC 响应式布局：宽→md 固定 980；中→压缩 md；窄→TOC 悬浮覆盖
+  const measured = contentWidth > 0;
+  const w = measured ? contentWidth : 4096;
+  const tocFootprint = tocWidth + TOC_GAP;
+  const floatToc = tocOpen && measured && contentWidth < TOC_FLOAT_BREAKPOINT;
+  const inlineToc = tocOpen && !floatToc;
+  const mdMax = Math.min(
+    MD_MAX_WIDTH,
+    Math.max(0, w - PADDING_X - (inlineToc ? tocFootprint : 0)),
+  );
+  const containerMax = Math.min(
+    w,
+    MD_MAX_WIDTH + (inlineToc ? tocFootprint : 0) + PADDING_X,
+  );
+
   const title = activeRender?.title || activeDoc || '选择文件查看';
   const fav = !!activeDoc && isFavorite(activeDoc);
 
@@ -210,7 +234,7 @@ export function DocView() {
         <Button
           variant="ghost"
           size="sm"
-          className={cn('hidden h-8 gap-1.5 lg:inline-flex', tocOpen && 'bg-muted text-foreground')}
+          className={cn('h-8 gap-1.5', tocOpen && 'bg-muted text-foreground')}
           onClick={() => setTocOpen((v) => !v)}
           title="目录"
         >
@@ -221,7 +245,10 @@ export function DocView() {
         </Button>
       </div>
 
-      <div className={cn('min-h-0 flex-1 overflow-auto', !graphOpen && 'md-theme-' + mdTheme)}>
+      <div
+        ref={contentAreaRef}
+        className={cn('relative min-h-0 flex-1 overflow-auto', !graphOpen && 'md-theme-' + mdTheme)}
+      >
         {graphOpen ? (
           <GraphView
             onOpen={(path, title) => {
@@ -230,8 +257,11 @@ export function DocView() {
             }}
           />
         ) : activeDoc ? (
-          <div className="mx-auto flex w-full max-w-5xl items-start gap-6 px-6 py-6">
-            <div className="min-w-0 flex-1">
+          <div
+            className="mx-auto flex w-full items-start px-6 py-6"
+            style={{ maxWidth: containerMax, gap: TOC_GAP }}
+          >
+            <div className="min-w-0 flex-1" style={{ maxWidth: mdMax }}>
               <div
                 ref={contentRef}
                 className="md-content"
@@ -264,15 +294,23 @@ export function DocView() {
                 </div>
               )}
             </div>
-            {tocOpen && (
-              <aside className="sticky top-6 hidden w-56 shrink-0 self-start lg:block">
-                <TocPanel onClose={() => setTocOpen(false)} />
+            {inlineToc && (
+              <aside className="sticky top-6 shrink-0 self-start" style={{ width: tocWidth }}>
+                <TocPanel />
               </aside>
             )}
           </div>
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
             选择文件查看
+          </div>
+        )}
+
+        {floatToc && (
+          <div className="absolute right-4 top-4 z-20" style={{ width: tocWidth }}>
+            <div className="shadow-lg">
+              <TocPanel />
+            </div>
           </div>
         )}
       </div>

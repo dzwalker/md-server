@@ -1,10 +1,12 @@
 import { Check } from 'lucide-react';
 import { useStore } from '@/state/store';
 import { MD_THEMES } from '@/lib/md-themes';
+import { TOC_WIDTH_MAX, TOC_WIDTH_MIN } from '@/lib/toc';
 import { cn } from '@/lib/utils';
+import { Input } from '@/components/ui/input';
 
 export function SettingsPanel() {
-  const { mdTheme, setMdTheme } = useStore();
+  const { mdTheme, setMdTheme, tocWidth, setTocWidth } = useStore();
 
   return (
     <div className="h-full overflow-y-auto overflow-x-hidden px-3 pb-3 pt-1">
@@ -34,6 +36,21 @@ export function SettingsPanel() {
             </button>
           );
         })}
+      </div>
+
+      <div className="mt-4 px-1 pb-1 text-xs text-muted-foreground">目录宽度 (px)</div>
+      <div className="flex items-center gap-2 px-1">
+        <Input
+          type="number"
+          value={tocWidth}
+          min={TOC_WIDTH_MIN}
+          max={TOC_WIDTH_MAX}
+          onChange={(e) => setTocWidth(Number(e.target.value))}
+          className="h-8"
+        />
+        <span className="shrink-0 text-xs text-muted-foreground">
+          {TOC_WIDTH_MIN}–{TOC_WIDTH_MAX}
+        </span>
       </div>
     </div>
   );
