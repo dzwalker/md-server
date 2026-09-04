@@ -13,7 +13,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { X, Star, Pin, Network, ListTree } from 'lucide-react';
+import { X, Star, Network, ListTree } from 'lucide-react';
 import { useStore, type OpenDoc } from '@/state/store';
 import { api } from '@/lib/api';
 import type { Backlink } from '@/lib/types';
@@ -85,9 +85,7 @@ export function DocView({ tocCollapsed, onOpenToc }: DocViewProps) {
     activeQuery,
     openDoc,
     toggleFavorite,
-    setFavorite,
     isFavorite,
-    isPinned,
     mdTheme,
   } = useStore();
 
@@ -164,7 +162,6 @@ export function DocView({ tocCollapsed, onOpenToc }: DocViewProps) {
 
   const title = activeRender?.title || activeDoc || '选择文件查看';
   const fav = !!activeDoc && isFavorite(activeDoc);
-  const pinned = !!activeDoc && isPinned(activeDoc);
 
   return (
     <div className="flex h-full flex-col">
@@ -196,15 +193,6 @@ export function DocView({ tocCollapsed, onOpenToc }: DocViewProps) {
               title="收藏 / 取消收藏"
             >
               <Star className={cn('h-4 w-4', fav && 'fill-current text-yellow-500')} />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={cn('h-8 w-8', !pinned && 'text-muted-foreground')}
-              onClick={() => setFavorite(activeDoc, !pinned)}
-              title="置顶 / 取消置顶"
-            >
-              <Pin className={cn('h-4 w-4', pinned && 'fill-current')} />
             </Button>
           </>
         )}
