@@ -51,7 +51,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden p-0 sm:max-w-xl">
+      <DialogContent className="top-6 translate-y-0 overflow-hidden p-0 sm:max-w-xl">
         <DialogTitle className="sr-only">快速打开</DialogTitle>
         <Command shouldFilter={false}>
           <Command.Input
@@ -63,9 +63,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           <Command.List className="max-h-80 overflow-auto p-1.5">
             {loading ? (
               <Command.Empty>搜索中…</Command.Empty>
-            ) : !q.trim() ? (
-              <Command.Empty>输入关键词搜索文档</Command.Empty>
-            ) : results.length === 0 ? (
+            ) : results.length === 0 && q.trim() ? (
               <Command.Empty>无结果</Command.Empty>
             ) : (
               results.map((r) => (
