@@ -43,6 +43,61 @@ md.use(emoji);
 md.use(taskLists, { enabled: true });
 md.use(footnote);
 md.use(katexPlugin);
+md.use(wikilinkPlugin);
+
+// 把 [[目标]] / [[目标|别名]] / [[目标#锚点]] 渲染成可点击链接。
+// 目标解析（basename → 真实 urlPath）在前端点击时进行（store.fileIndex）。
+function wikilinkPlugin(md: MarkdownIt) {
+  const rule = (state: any, silent: boolean): boolean => {
+    const src = state.src as string;
+    const pos = state.pos as number;
+    if (src.charCodeAt(pos) !== 0x5b || src.charCodeAt(pos + 1) !== 0x5b) return false; // [[
+    let end = pos + 2;
+    while (end < state.posMax - 1) {
+      if (src.charCodeAt(end) === 0x5d && src.charCodeAt(end + 1) === 0x5d) break;
+      end++;
+    }
+    if (end >= state.posMax - 1) return false; // 没有闭合 ]]
+    const raw = src.slice(pos + 2, end);
+    if (!raw.trim()) return false;
+
+    let target = raw;
+    let alias = '';
+    const pipe = raw.indexOf('|');
+    if (pipe >= 0) {
+      alias = raw.slice(pipe + 1).trim();
+      target = raw.slice(0, pipe).trim();
+    }
+    let anchor = '';
+    const hash = target.indexOf('#');
+    if (hash >= 0) {
+      anchor = target.slice(hash + 1).trim();
+      target = target.slice(0, hash).trim();
+    }
+    if (!target) return false;
+    const text = alias || target;
+
+    if (!silent) {
+      const token = state.push('wikilink', '', 0);
+      token.content = text;
+      token.attrSet('class', 'wikilink');
+      token.attrSet('data-target', target);
+      token.attrSet('data-anchor', anchor);
+      token.attrSet('href', '#');
+    }
+    state.pos = end + 2;
+    return true;
+  };
+  md.inline.ruler.before('emphasis', 'wikilink', rule);
+
+  md.renderer.rules.wikilink = (tokens: any[], idx: number) => {
+    const t = tokens[idx];
+    const target = md.utils.escapeHtml(t.attrGet('data-target') || '');
+    const anchor = md.utils.escapeHtml(t.attrGet('data-anchor') || '');
+    const text = md.utils.escapeHtml(t.content);
+    return `<a class="wikilink" href="#" data-target="${target}" data-anchor="${anchor}">${text}</a>`;
+  };
+}
 
 function katexPlugin(md: MarkdownIt) {
   md.inline.ruler.after('escape', 'math_inline', (state, silent) => {

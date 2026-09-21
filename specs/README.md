@@ -21,3 +21,6 @@ specs/<feature-slug>/
 ## 现状
 
 - `test-harness/`：为 md-server 建立测试运行器与首个冒烟测试（首个 spec）。
+- `frontend-refactor/`：前端重构为 React + shadcn/ui。
+- `incremental-index/`：文档打开慢的根治——增量索引 + 读接口不再全库扫盘（2026-09-20）。
+- `perf-followups/`：性能收尾三件事——前端载荷/渲染、索引库回收、保存空间不再全量重建（2026-09-21 规划）。

@@ -3,20 +3,22 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
-// 在加载 scanner/config 之前准备好临时文档空间并设置 MD_ROOTS：
+// 在加载 scanner/config 之前准备好临时文档空间并设置 MD_BASE_DIR + MD_SETS：
 // config.ts 在模块加载时读取环境变量，因此这里必须先设环境再动态 import。
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'md-server-test-'));
-fs.mkdirSync(path.join(tmpRoot, 'sub'));
-fs.writeFileSync(path.join(tmpRoot, 'hello.md'), '# Hello\n\n正文 **bold**\n');
-process.env.MD_ROOTS = JSON.stringify([{ url: '/t', dir: tmpRoot }]);
-process.env.MD_ROOTS_FILE = path.join(tmpRoot, 'roots.json'); // 不存在的文件，确保 MD_ROOTS 生效
+fs.mkdirSync(path.join(tmpRoot, 't', 'sub'), { recursive: true });
+fs.writeFileSync(path.join(tmpRoot, 't', 'hello.md'), '# Hello\n\n正文 **bold**\n');
+process.env.MD_BASE_DIR = tmpRoot;
+process.env.MD_SETS = JSON.stringify([{ id: 't', name: 't', dirs: ['t'] }]);
+process.env.MD_SETS_FILE = path.join(tmpRoot, 'sets.json'); // 不存在的文件，确保 MD_SETS 生效
 
 const { scanAll } = await import('./scanner.js');
 const { renderMarkdown } = await import('./render.js');
 
 afterAll(() => {
-  delete process.env.MD_ROOTS;
-  delete process.env.MD_ROOTS_FILE;
+  delete process.env.MD_BASE_DIR;
+  delete process.env.MD_SETS;
+  delete process.env.MD_SETS_FILE;
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 

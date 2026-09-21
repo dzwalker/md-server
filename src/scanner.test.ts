@@ -14,4 +14,13 @@ describe('buildTree', () => {
     expect(tree[0].children![0]).toMatchObject({ name: 'sub', type: 'dir' });
     expect(tree[0].children![1]).toMatchObject({ name: 'b.md', type: 'file' });
   });
+
+  it('补充空目录节点（无 md 文件的空间/文件夹也显示）', () => {
+    const files: MdFile[] = [];
+    const tree = buildTree(files, ['/docs', '/docs/empty']);
+    expect(tree).toHaveLength(1);
+    expect(tree[0]).toMatchObject({ name: 'docs', path: '/docs', type: 'dir' });
+    expect(tree[0].children).toHaveLength(1);
+    expect(tree[0].children![0]).toMatchObject({ name: 'empty', path: '/docs/empty', type: 'dir' });
+  });
 });

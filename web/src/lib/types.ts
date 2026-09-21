@@ -1,9 +1,10 @@
 export interface TreeNode {
   name: string;
   path: string;
-  type: 'dir' | 'file';
+  type: 'dir' | 'file' | 'tool';
   title?: string;
   children?: TreeNode[];
+  toolId?: string;
 }
 
 export interface SearchResult {
@@ -33,15 +34,16 @@ export interface Favorite {
   addedAt: number;
 }
 
-export interface Root {
-  url: string;
-  dir: string;
+export interface SpaceSet {
+  id: string;
+  name: string;
+  dirs: string[];
+  embed: boolean;
 }
 
-export interface RootsResponse {
-  roots: Root[];
-  file: string;
-  exists: boolean;
+export interface SetsResponse {
+  baseDir: string;
+  sets: SpaceSet[];
 }
 
 export interface Heading {

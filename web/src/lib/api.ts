@@ -3,10 +3,10 @@ import type {
   Favorite,
   GraphData,
   RenderResult,
-  Root,
-  RootsResponse,
   SearchResult,
   SemanticResult,
+  SpaceSet,
+  SetsResponse,
   TagInfo,
   TreeNode,
 } from './types';
@@ -23,18 +23,38 @@ async function post<T>(url: string, body: unknown): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`POST ${url} -> ${res.status}`);
+  if (!res.ok) {
+    let msg = `POST ${url} -> ${res.status}`;
+    try {
+      const b = (await res.json()) as { error?: string };
+      if (b?.error) msg = b.error;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(msg);
+  }
   return res.json() as Promise<T>;
 }
 
 async function del<T>(url: string): Promise<T> {
   const res = await fetch(url, { method: 'DELETE' });
-  if (!res.ok) throw new Error(`DELETE ${url} -> ${res.status}`);
+  if (!res.ok) {
+    let msg = `DELETE ${url} -> ${res.status}`;
+    try {
+      const b = (await res.json()) as { error?: string };
+      if (b?.error) msg = b.error;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(msg);
+  }
   return res.json() as Promise<T>;
 }
 
 export const api = {
   tree: () => get<TreeNode[]>('/api/tree'),
+
+  status: () => get<{ dataVersion: number }>('/api/status'),
 
   search: (q: string, opts?: { tag?: string; dir?: string; limit?: number }) => {
     const p = new URLSearchParams({ q });
@@ -53,10 +73,11 @@ export const api = {
   addFavorite: (path: string, pinned: boolean) => post<Favorite[]>('/api/favorites', { path, pinned }),
   removeFavorite: (path: string) => del<Favorite[]>(`/api/favorites${path}`),
 
-  roots: () => get<RootsResponse>('/api/roots'),
-  saveRoots: (roots: Root[]) => post<{ roots: Root[] }>('/api/roots', roots),
+  sets: () => get<SetsResponse>('/api/sets'),
+  saveSets: (sets: SpaceSet[]) => post<SetsResponse>('/api/sets', sets),
 
   render: (path: string) => get<RenderResult>(`/api/render${path}`),
+  stat: (path: string) => get<{ exists: boolean; path: string; mtimeMs?: number; size?: number }>(`/api/stat?path=${encodeURIComponent(path)}`),
   backlinks: (path: string) => get<Backlink[]>(`/api/backlinks${path}`),
   outlinks: (path: string) => get<string[]>(`/api/outlinks${path}`),
 

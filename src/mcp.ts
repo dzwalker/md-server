@@ -1,8 +1,8 @@
 import express from 'express';
 import { createRequire } from 'node:module';
-import { scanAll } from './scanner.js';
+import { resolveUrlPath, toMdFile } from './scanner.js';
 import { semanticSearch } from './embed.js';
-import { searchFiles, listTags, listTodos, listDueTasks } from './index-db.js';
+import { searchFiles, listTags, listTodos, listDueTasks, getFileMeta } from './index-db.js';
 import { ROOTS } from './config.js';
 import fs from 'node:fs';
 const require = createRequire(import.meta.url);
@@ -34,10 +34,15 @@ server.registerTool('read_doc', {
   description: '读取一个 md 文档全文（含 YAML frontmatter）',
   inputSchema: { path: z.string().describe('文档路径，如 /docs/notes/example.md') },
 }, async ({ path }) => {
-  const f = scanAll().find((x) => x.urlPath === path);
-  if (!f) return { content: [{ type: 'text', text: `not found: ${path}` }], isError: true };
-  const content = fs.readFileSync(f.fsPath, 'utf8');
-  return { content: [{ type: 'text', text: JSON.stringify({ path, title: f.title, frontmatter: f.frontmatter, content }) }] };
+  // 走索引拿元信息（毫秒级），不再全库扫盘。
+  const meta = getFileMeta(path);
+  const fsPath = resolveUrlPath(path);
+  const fallback = !meta && fsPath ? toMdFile(fsPath) : null;
+  if ((!meta && !fallback) || !fsPath) return { content: [{ type: 'text', text: `not found: ${path}` }], isError: true };
+  const title = meta?.title ?? fallback!.title;
+  const frontmatter = meta?.frontmatter ?? fallback!.frontmatter;
+  const content = fs.readFileSync(fsPath, 'utf8');
+  return { content: [{ type: 'text', text: JSON.stringify({ path, title, frontmatter, content }) }] };
 });
 
 server.registerTool('search_semantic', {

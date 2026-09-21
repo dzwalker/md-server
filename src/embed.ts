@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import { scanAll, MdFile } from './scanner.js';
+import { isEmbedEnabled } from './config.js';
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
 
@@ -56,19 +57,26 @@ export function embeddingsStatus() {
   const exists = (d.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE type='table' AND name='embeddings'").get() as any).c;
   const built = exists ? (d.prepare('SELECT COUNT(*) c FROM embeddings').get() as any).c : 0;
   d.close();
-  return { built, total: scanAll().length, model: MODEL };
+  const embedTotal = scanAll().filter((f) => isEmbedEnabled(f.urlPath)).length;
+  return { built, total: embedTotal, model: MODEL };
 }
 
 function ensureTable(d: any) {
   d.exec('CREATE TABLE IF NOT EXISTS embeddings (path TEXT PRIMARY KEY, vector TEXT)');
 }
 
-// 全量（重）建向量索引
+// 全量（重）建向量索引：只索引「参与语义索引」的 set 的文件，并清掉其余文件的旧向量。
 export async function buildEmbeddings() {
   const d = new Database(DB_PATH);
   ensureTable(d);
   d.close();
-  const files = scanAll();
+  const files = scanAll().filter((f) => isEmbedEnabled(f.urlPath));
+  const keep = new Set(files.map((f) => f.urlPath));
+  const d2 = new Database(DB_PATH);
+  const rows = d2.prepare('SELECT path FROM embeddings').all() as { path: string }[];
+  d2.close();
+  const stale = rows.filter((r) => !keep.has(r.path)).map((r) => r.path);
+  if (stale.length) deleteEmbeddings(stale);
   await embedFiles(files);
   return files.length;
 }
@@ -99,6 +107,16 @@ export function deleteEmbeddings(paths: string[]) {
   const tx = d.transaction(() => paths.forEach((p) => del.run(p)));
   tx();
   d.close();
+}
+
+// 按 url 前缀删除向量（某空间/目录被移除时用）
+export function deleteEmbeddingsByPrefix(urlPrefix: string) {
+  const d = new Database(DB_PATH);
+  ensureTable(d);
+  const like = urlPrefix.replace(/\/+$/, '') + '/%';
+  const info = d.prepare('DELETE FROM embeddings WHERE path LIKE ?').run(like);
+  d.close();
+  return info.changes;
 }
 
 export async function semanticSearch(q: string, limit = 10) {

@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ChevronRight, List } from 'lucide-react';
 import { useStore } from '@/state/store';
 import type { Heading } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
 
 interface TocNode {
   id: string;
@@ -38,7 +37,7 @@ function flatten(nodes: TocNode[]): TocNode[] {
 }
 
 export function TocPanel() {
-  const { activeRender, activeDoc } = useStore();
+  const { activeRender, activeDoc, registerTocControl } = useStore();
   const headings = activeRender?.headings || [];
   const tree = useMemo(() => buildToc(headings), [headings]);
   const flat = useMemo(() => flatten(tree), [tree]);
@@ -77,15 +76,22 @@ export function TocPanel() {
     });
   }
 
-  function expandToLevel(n: number) {
-    setCollapsed(new Set(flat.filter((x) => x.children.length && x.level >= n).map((x) => x.id)));
-  }
-  function openAll() {
-    setCollapsed(new Set());
-  }
+  const expandToLevel = useCallback(
+    (n: number) => {
+      setCollapsed(new Set(flat.filter((x) => x.children.length && x.level >= n).map((x) => x.id)));
+    },
+    [flat],
+  );
+  const openAll = useCallback(() => setCollapsed(new Set()), []);
+
+  // 把「层级」控制暴露给主区头部（放在「目录」按钮后面）
+  useEffect(() => {
+    registerTocControl({ expandToLevel, openAll });
+    return () => registerTocControl(null);
+  }, [registerTocControl, expandToLevel, openAll]);
 
   function scrollTo(id: string) {
-    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.getElementById(id)?.scrollIntoView({ behavior: 'auto', block: 'start' });
   }
 
   function render(nodes: TocNode[], depth: number): ReactNode {
@@ -127,28 +133,11 @@ export function TocPanel() {
     );
   }
 
-  const btn = 'h-6 px-1.5 text-xs';
-
   return (
     <div className="flex max-h-[calc(100vh-9rem)] flex-col rounded-lg border bg-sidebar">
       <div className="flex shrink-0 items-center gap-2 px-3 pb-1 pt-2">
         <List className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate text-sm font-medium">目录</span>
-      </div>
-      <div className="flex shrink-0 items-center gap-0.5 px-3 pb-1 text-xs text-muted-foreground">
-        <span className="mr-1">层级:</span>
-        <Button variant="ghost" size="sm" className={btn} onClick={() => expandToLevel(1)}>
-          1
-        </Button>
-        <Button variant="ghost" size="sm" className={btn} onClick={() => expandToLevel(2)}>
-          2
-        </Button>
-        <Button variant="ghost" size="sm" className={btn} onClick={() => expandToLevel(3)}>
-          3
-        </Button>
-        <Button variant="ghost" size="sm" className={btn} onClick={openAll}>
-          a
-        </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-1">
         {!headings.length ? (

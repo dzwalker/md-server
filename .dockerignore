@@ -4,6 +4,7 @@ web/node_modules
 dist
 web/dist
 roots.json
+sets.json
 backup-md-server.sh
 docker-compose.yml
 docker-compose.override.yml

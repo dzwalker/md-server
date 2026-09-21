@@ -151,6 +151,10 @@
 /* 渲染内容（服务端 Markdown HTML）样式 */
 .md-content { line-height: 1.7; font-size: 15px; word-break: break-word; color: var(--md-fg, var(--foreground)); }
 .md-content > :first-child { margin-top: 0; }
+/* 长文档（1MB+ HTML、上万节点）里，屏幕外的块跳过布局与绘制，显著降低首屏卡顿。
+   contain-intrinsic-size 用 auto + 估值，浏览器首次布局后会记住真实高度。 */
+.md-content > * { content-visibility: auto; contain-intrinsic-size: auto 28px; }
+.md-content > .mermaid-wrap, .md-content > .mermaid-src { contain-intrinsic-size: auto 280px; }
 .md-content h1, .md-content h2, .md-content h3, .md-content h4, .md-content h5, .md-content h6 {
   color: var(--md-heading, var(--foreground));
   margin: 1.2em 0 0.6em;
@@ -164,22 +168,152 @@
 .md-content h5, .md-content h6 { font-size: 1em; }
 .md-content p { margin: 0.5em 0; }
 .md-content ul, .md-content ol { padding-left: 1.5em; margin: 0.5em 0; }
-.md-content pre { background: var(--md-code-bg, var(--muted)); padding: 12px; border-radius: 6px; overflow-x: auto; }
+.md-content pre { background: var(--md-code-bg, var(--muted)); padding: 12px; border-radius: 6px; overflow-x: auto; margin: 1em 0; }
 .md-content code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em; }
-.md-content table { border-collapse: collapse; }
+.md-content table { border-collapse: collapse; margin: 1em 0; }
 .md-content th, .md-content td { border: 1px solid var(--border); padding: 5px 10px; }
 .md-content img { max-width: 100%; }
 .md-content blockquote {
   background: var(--md-quote, var(--muted));
   border-left: 4px solid var(--md-quote-border, var(--border));
-  margin-left: 0;
+  margin: 1em 0;
   padding: 8px 14px;
   border-radius: 0 6px 6px 0;
   color: var(--md-fg, var(--foreground));
 }
+.md-content hr { margin: 1.5em 0; }
 .md-content .katex-block { display: block; overflow-x: auto; padding: 4px 0; }
 .md-content mark { background: #ffe58f; color: #000; padding: 0 1px; border-radius: 2px; }
 .md-content a { color: var(--md-accent, #0969da); text-decoration: var(--md-link-underline, none); }
+
+/* ==== mermaid 图表 + 全屏查看 ==== */
+.mermaid-wrap { position: relative; }
+.md-content .mermaid {
+  text-align: center;
+  margin: 1em 0;
+  cursor: zoom-in;
+  background: var(--md-code-bg, var(--muted));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.md-content .mermaid svg { max-width: 100%; height: auto; }
+.mermaid-toolbar {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+  z-index: 5;
+}
+.mermaid-wrap:hover .mermaid-toolbar { opacity: 1; }
+.mermaid-toolbar button {
+  background: var(--muted);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.mermaid-toolbar button:hover { background: var(--accent); }
+.mermaid-toolbar button:disabled { opacity: 0.6; cursor: progress; }
+
+#mermaid-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: none;
+  background: rgba(0, 0, 0, 0.62);
+  cursor: grab;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+#mermaid-lightbox * { user-select: none; -webkit-user-select: none; }
+#mermaid-lightbox.bg-light { background: #ececef; }
+#mermaid-lightbox.open { display: block; }
+#mermaid-lightbox.dragging { cursor: grabbing; }
+#mermaid-lightbox-stage {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform-origin: center center;
+  transition: transform 0.05s linear;
+  will-change: transform;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.45);
+}
+.dark #mermaid-lightbox-stage {
+  background: #1e1e1e;
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+}
+#mermaid-lightbox-stage svg { max-width: none; height: auto; }
+#mermaid-lightbox-close,
+#mermaid-lightbox-bg-toggle {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 8px;
+  cursor: pointer;
+  z-index: 10000;
+}
+#mermaid-lightbox.bg-light #mermaid-lightbox-close,
+#mermaid-lightbox.bg-light #mermaid-lightbox-bg-toggle {
+  background: rgba(0, 0, 0, 0.06);
+  color: #222;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+}
+#mermaid-lightbox-close {
+  position: fixed;
+  top: 16px;
+  right: 20px;
+  padding: 6px 12px;
+  font-size: 20px;
+  line-height: 1;
+}
+#mermaid-lightbox-bg-toggle {
+  position: fixed;
+  bottom: 14px;
+  right: 20px;
+  padding: 5px 12px;
+  font-size: 12px;
+}
+#mermaid-lightbox-hint {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  color: #fff;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.14);
+  padding: 4px 12px;
+  border-radius: 12px;
+  pointer-events: none;
+}
+#mermaid-lightbox.bg-light #mermaid-lightbox-hint {
+  color: #333;
+  background: rgba(0, 0, 0, 0.06);
+}
+.mermaid-error {
+  margin: 1em 0;
+  padding: 12px 16px;
+  border-left: 4px solid #f14c4c;
+  background: rgba(241, 76, 76, 0.12);
+  color: var(--foreground);
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+.mermaid-error pre { margin: 8px 0 0; white-space: pre-wrap; background: none; padding: 0; }
 
 /* react-arborist 树：行不撑出水平滚动条（覆盖其 min-width: max-content） */
 [role="treeitem"] { min-width: 0 !important; }

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Group, Panel, Separator, type Layout, type PanelImperativeHandle } from 'react-resizable-panels';
-import { StoreProvider } from '@/state/store';
+import { StoreProvider, useStore } from '@/state/store';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import {
   Sheet,
@@ -15,6 +15,7 @@ import { CommandPalette } from '@/components/command-palette';
 import { useTheme } from '@/hooks/use-theme';
 import { useIsMobile } from '@/hooks/use-is-mobile';
 import type { ActivityId } from '@/lib/activities';
+import { stripMdExt } from '@/lib/utils';
 
 const LAYOUT_KEY = 'md-server-layout';
 const DEFAULT_LAYOUT: Layout = { sidebar: 20, main: 80 };
@@ -55,17 +56,45 @@ function Shell() {
   const sidebarRef = useRef<PanelImperativeHandle | null>(null);
   const { theme, toggle } = useTheme();
   const isMobile = useIsMobile();
+  const { activeDoc, openDocs } = useStore();
+
+  // 浏览器标签标题：未打开文档时「文档专家」；打开时「文档库 - 文件名(不含后缀)」。
+  useEffect(() => {
+    if (!activeDoc) {
+      document.title = '文档专家';
+      return;
+    }
+    const info = openDocs.find((d) => d.path === activeDoc);
+    const isTool = activeDoc.startsWith('/__tools__/');
+    const name = isTool
+      ? info?.title || '工具'
+      : stripMdExt(activeDoc.split('/').pop() || '');
+    document.title = '文档库 - ' + name;
+  }, [activeDoc, openDocs]);
+
+  const toggleSidebar = useCallback(() => {
+    if (isMobile) {
+      setSidebarOpen((v) => !v);
+    } else if (sidebarRef.current?.isCollapsed()) {
+      sidebarRef.current?.expand();
+    } else {
+      sidebarRef.current?.collapse();
+    }
+  }, [isMobile]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'p') {
         e.preventDefault();
         setPaletteOpen((v) => !v);
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        toggleSidebar();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [toggleSidebar]);
 
   function handleLayoutChanged(layout: Layout) {
     saveLayout(layout);
@@ -80,26 +109,27 @@ function Shell() {
   const layout = isMobile ? (
     <TooltipProvider>
       <div className="flex h-screen w-full overflow-hidden">
-        <div className="w-12 shrink-0">
-          <ActivityBar
-            active={active}
-            onChange={(id) => {
-              setActive(id);
-              setSidebarOpen(true);
-            }}
-            theme={theme}
-            onToggleTheme={toggle}
-          />
-        </div>
         <div className="flex min-w-0 flex-1 flex-col">
-          <DocView />
+          <DocView onOpenSidebar={() => setSidebarOpen(true)} />
         </div>
         <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-          <SheetContent side="left" className="w-72 p-0">
+          <SheetContent side="left" className="w-80 p-0">
             <SheetHeader className="sr-only">
               <SheetTitle>侧栏</SheetTitle>
             </SheetHeader>
-            <Sidebar active={active} onCollapse={() => setSidebarOpen(false)} />
+            <div className="flex h-full">
+              <div className="w-12 shrink-0">
+                <ActivityBar
+                  active={active}
+                  onChange={(id) => setActive(id)}
+                  theme={theme}
+                  onToggleTheme={toggle}
+                />
+              </div>
+              <div className="min-w-0 flex-1">
+                <Sidebar active={active} onCollapse={() => setSidebarOpen(false)} />
+              </div>
+            </div>
           </SheetContent>
         </Sheet>
       </div>

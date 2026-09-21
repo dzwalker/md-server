@@ -3,14 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>md-server</title>
+    <title>文档专家</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="stylesheet" href="/media/highlight.min.css" />
     <link rel="stylesheet" href="/media/katex.min.css" />
   </head>
   <body>
     <div id="root"></div>
-    <script src="/media/katex.min.js"></script>
-    <script src="/media/mermaid.min.js"></script>
+    <!-- katex / mermaid 由 markdown-extras 在正文真的出现公式或图表时按需加载（首屏省 3.6MB） -->
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -1,12 +1,13 @@
 import { Check } from 'lucide-react';
 import { useStore } from '@/state/store';
 import { MD_THEMES } from '@/lib/md-themes';
+import { MERMAID_THEMES } from '@/lib/mermaid-themes';
 import { TOC_WIDTH_MAX, TOC_WIDTH_MIN } from '@/lib/toc';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 
 export function SettingsPanel() {
-  const { mdTheme, setMdTheme, tocWidth, setTocWidth } = useStore();
+  const { mdTheme, setMdTheme, mermaidTheme, setMermaidTheme, tocWidth, setTocWidth, hideEmptyDirs, setHideEmptyDirs, showFilename, setShowFilename } = useStore();
 
   return (
     <div className="h-full overflow-y-auto overflow-x-hidden px-3 pb-3 pt-1">
@@ -38,6 +39,22 @@ export function SettingsPanel() {
         })}
       </div>
 
+      <div className="mt-4 px-1 pb-1 text-xs text-muted-foreground">Mermaid 图表主题</div>
+      <select
+        value={mermaidTheme}
+        onChange={(e) => setMermaidTheme(e.target.value)}
+        className="h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm text-foreground outline-none focus-visible:border-ring"
+      >
+        {MERMAID_THEMES.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.name} — {t.description}
+          </option>
+        ))}
+      </select>
+      <div className="px-1 pb-1 text-xs text-muted-foreground">
+        仅影响正文里的 mermaid 图；单篇文档内用 {'%%{init: ...}%%'} 声明的主题仍优先生效。
+      </div>
+
       <div className="mt-4 px-1 pb-1 text-xs text-muted-foreground">目录宽度 (px)</div>
       <div className="flex items-center gap-2 px-1">
         <Input
@@ -51,6 +68,32 @@ export function SettingsPanel() {
         <span className="shrink-0 text-xs text-muted-foreground">
           {TOC_WIDTH_MIN}–{TOC_WIDTH_MAX}
         </span>
+      </div>
+
+      <div className="mt-4 px-1 pb-1 text-xs text-muted-foreground">资源管理器</div>
+      <label className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1.5 hover:bg-accent">
+        <input
+          type="checkbox"
+          checked={hideEmptyDirs}
+          onChange={(e) => setHideEmptyDirs(e.target.checked)}
+          className="h-3.5 w-3.5 shrink-0"
+        />
+        <span className="text-sm">隐藏无文档的文件夹</span>
+      </label>
+      <div className="px-1 pb-1 text-xs text-muted-foreground">
+        在资源管理器里隐藏后代没有任何文档的文件夹（一级目录始终保留）。
+      </div>
+      <label className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1.5 hover:bg-accent">
+        <input
+          type="checkbox"
+          checked={showFilename}
+          onChange={(e) => setShowFilename(e.target.checked)}
+          className="h-3.5 w-3.5 shrink-0"
+        />
+        <span className="text-sm">显示文件名（而非文档标题）</span>
+      </label>
+      <div className="px-1 pb-1 text-xs text-muted-foreground">
+        开启后，资源管理器与顶部标签页用文件名显示，而非 frontmatter/正文里的标题。
       </div>
     </div>
   );

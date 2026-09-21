@@ -13,6 +13,7 @@ out/
 
 # runtime personal config (multi-space roots)
 roots.json
+sets.json
 
 # personal helper scripts (not part of the project)
 backup-md-server.sh
