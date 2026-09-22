@@ -8,7 +8,7 @@ import { scanAll, buildTree, scanDirs, scanRoot, toMdFile, resolveUrlPath, fsPat
 import type { MdFile } from './scanner.js';
 import type { Root } from './config.js';
 import { renderMarkdown } from './render.js';
-import { rebuildIndex, syncIndex, removeIndexPrefixInBatches, searchFiles, listTags, indexStats, backlinks, outlinks, graph, listFavorites, setFavorite, removeFavorite, listTodos, listDueTasks, indexFiles, indexFilesInBatches, removeIndexPaths, removeIndexPrefix, listFileSummaries, listFilesMeta, getFileMeta, truncateWal } from './index-db.js';
+import { rebuildIndex, syncIndex, removeIndexPrefixInBatches, searchFiles, listTags, indexStats, backlinks, outlinks, graph, listFavorites, setFavorite, removeFavorite, listTodos, listDueTasks, indexFiles, indexFilesInBatches, removeIndexPaths, removeIndexPrefix, listFileSummaries, listFilesMeta, getFileMeta, listRecentFiles, truncateWal } from './index-db.js';
 import { startMcp } from './mcp.js';
 import { buildEmbeddings, embedFiles, deleteEmbeddings, deleteEmbeddingsByPrefix, semanticSearch, embeddingsStatus } from './embed.js';
 import { createRequire } from 'node:module';
@@ -89,6 +89,16 @@ app.get('/api/search', async (req) => {
     dir: dir ? String(dir) : undefined,
     limit: Number(limit) || 30,
   });
+});
+
+// 命令面板空态「最近更新」：按修改时间倒序，dirs 为当前空间的目录名（逗号分隔）。
+app.get('/api/recent', async (req) => {
+  const { dirs, limit } = (req.query as any) || {};
+  const list = String(dirs || '')
+    .split(',')
+    .map((d) => d.trim())
+    .filter(Boolean);
+  return listRecentFiles({ dirs: list, limit: Number(limit) || 20 });
 });
 
 app.get('/api/tags', async () => listTags());

@@ -21,6 +21,15 @@ export interface SemanticResult {
   score: number;
 }
 
+/** /api/recent 的响应：命令面板空态「最近更新」列表项。 */
+export interface RecentFile {
+  path: string;
+  title: string;
+  name: string;
+  dir: string;
+  mtimeMs: number;
+}
+
 export interface TagInfo {
   tag: string;
   cnt: number;

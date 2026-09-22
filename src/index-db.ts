@@ -419,6 +419,24 @@ export function getFileMeta(urlPath: string): { urlPath: string; title: string; 
   };
 }
 
+/**
+ * 最近更新的文档（命令面板空态用）：按 mtime 倒序，一条 SQL 出结果。
+ * dirs 为「空间目录名」列表（set.dirs），按 urlPath 前缀过滤；不传则全局。
+ */
+export function listRecentFiles(opts: { dirs?: string[]; limit?: number } = {}): { path: string; title: string; name: string; dir: string; mtimeMs: number }[] {
+  const limit = Math.min(200, Math.max(1, Math.floor(Number(opts.limit)) || 20));
+  const dirs = (opts.dirs || []).map((d) => String(d).replace(/^\/+|\/+$/g, '')).filter(Boolean);
+  const where = dirs.length ? ` WHERE (${dirs.map(() => 'path LIKE ?').join(' OR ')})` : '';
+  const params: unknown[] = [...dirs.map((d) => `/${d}/%`), limit];
+  const rows = init()
+    .prepare(`SELECT path, title, name, dir, mtime_ms FROM files${where} ORDER BY mtime_ms DESC LIMIT ?`)
+    .all(...params) as any[];
+  return rows.map((r) => ({
+    path: r.path, title: r.title || r.name || r.path, name: r.name || r.path.split('/').pop(),
+    dir: r.dir, mtimeMs: r.mtime_ms || 0,
+  }));
+}
+
 // ---------- 收藏 / 置顶 ----------
 export function listFavorites() {
   const d = init();

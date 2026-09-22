@@ -24,3 +24,4 @@ specs/<feature-slug>/
 - `frontend-refactor/`：前端重构为 React + shadcn/ui。
 - `incremental-index/`：文档打开慢的根治——增量索引 + 读接口不再全库扫盘（2026-09-20）。
 - `perf-followups/`：性能收尾三件事——前端载荷/渲染、索引库回收、保存空间不再全量重建（2026-09-21 规划）。
+- `command-palette-nav/`：命令面板空态「最近更新」（`/api/recent`）+ `⌘O` 已打开文档看板切换（2026-09-22）。

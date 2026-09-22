@@ -3,6 +3,7 @@ import type {
   Favorite,
   GraphData,
   RawFile,
+  RecentFile,
   RenderResult,
   SearchResult,
   SemanticResult,
@@ -67,6 +68,14 @@ export const api = {
 
   searchSemantic: (q: string, limit = 10) =>
     get<SemanticResult[]>(`/api/search-semantic?q=${encodeURIComponent(q)}&limit=${limit}`),
+
+  // 命令面板空态：当前空间内最近更新的文档（不传 dirs 则全局）。
+  recent: (opts?: { dirs?: string[]; limit?: number }) => {
+    const p = new URLSearchParams();
+    if (opts?.dirs?.length) p.set('dirs', opts.dirs.join(','));
+    p.set('limit', String(opts?.limit ?? 20));
+    return get<RecentFile[]>(`/api/recent?${p.toString()}`);
+  },
 
   tags: () => get<TagInfo[]>('/api/tags'),
 

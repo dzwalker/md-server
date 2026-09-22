@@ -47,15 +47,18 @@ function DialogOverlay({
 
 function DialogContent({
   className,
+  overlayClassName,
   children,
   showCloseButton = true,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
+  /** 覆写遮罩样式：命令面板类弹层用更强的毛玻璃。 */
+  overlayClassName?: string
 }) {
   return (
     <DialogPortal>
-      <DialogOverlay />
+      <DialogOverlay className={overlayClassName} />
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(

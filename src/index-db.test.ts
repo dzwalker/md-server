@@ -10,7 +10,7 @@ fs.mkdirSync(path.join(tmpRoot, 't'), { recursive: true });
 fs.writeFileSync(path.join(tmpRoot, 't', 'a.md'), '# Alpha\n\nalpha 正文 [[b]]\n');
 fs.writeFileSync(path.join(tmpRoot, 't', 'b.md'), '# Beta\n\nbeta 正文\n');
 process.env.MD_BASE_DIR = tmpRoot;
-process.env.MD_SETS = JSON.stringify([{ id: 't', name: 't', dirs: ['t'], embed: false }]);
+process.env.MD_SETS = JSON.stringify([{ id: 't', name: 't', dirs: ['t', 'r1', 'r2'], embed: false }]);
 process.env.MD_SETS_FILE = path.join(tmpRoot, 'sets.json'); // 不存在 -> 走 MD_SETS
 process.env.MD_INDEX_DB = path.join(tmpRoot, 'index.db');
 
@@ -20,6 +20,7 @@ const Database = require('better-sqlite3');
 const {
   rebuildIndex, indexFiles, indexFilesInBatches, removeIndexPaths, removeIndexPrefix,
   searchFiles, indexStats, listFileSummaries, getFileMeta, outlinks, backlinks,
+  listRecentFiles,
 } = await import('./index-db.js');
 const { toMdFile, scanRoot } = await import('./scanner.js');
 
@@ -111,5 +112,63 @@ describe('增量索引 indexFiles / removeIndexPaths', () => {
     fs.rmSync(path.join(tmpRoot, 't', 'bulk'), { recursive: true });
     expect(removeIndexPrefix('/t/bulk')).toBe(25);
     expect(indexStats().files).toBe(before);
+  });
+});
+
+// 命令面板空态「最近更新」：一条 SQL 取按修改时间倒序的文档，可限定在若干空间目录内。
+describe('最近更新 listRecentFiles', () => {
+  // 比其它测试文件的真实 mtime 都新，断言顺序才稳定。
+  const BASE = Date.now() + 1_000_000;
+
+  function seed(dirName: string, files: { name: string; offset: number }[]) {
+    fs.mkdirSync(path.join(tmpRoot, dirName), { recursive: true });
+    const indexed = files.map((f) => {
+      const p = path.join(tmpRoot, dirName, f.name);
+      fs.writeFileSync(p, `# ${f.name.replace(/\.md$/, '')}\n\n正文\n`);
+      return { ...toMdFile(p)!, mtimeMs: BASE + f.offset };
+    });
+    indexFiles(indexed);
+  }
+
+  it('全局按 mtime 倒序，并支持 dirs 过滤与 limit 截断', () => {
+    seed('r1', [
+      { name: 'a.md', offset: 100 },
+      { name: 'b.md', offset: 300 },
+      { name: 'c.md', offset: 200 },
+    ]);
+    seed('r2', [
+      { name: 'x.md', offset: 900 },
+      { name: 'y.md', offset: 400 },
+    ]);
+
+    // 不限目录：全局最近 3 篇
+    expect(listRecentFiles({ limit: 3 }).map((r) => r.path)).toEqual([
+      '/r2/x.md',
+      '/r2/y.md',
+      '/r1/b.md',
+    ]);
+
+    // 限目录：只返回该空间目录下的文档
+    expect(listRecentFiles({ dirs: ['r1'], limit: 10 }).map((r) => r.path)).toEqual([
+      '/r1/b.md',
+      '/r1/c.md',
+      '/r1/a.md',
+    ]);
+
+    // 多个目录：合并后仍全局倒序，limit 截断
+    expect(listRecentFiles({ dirs: ['r1', 'r2'], limit: 4 }).map((r) => r.path)).toEqual([
+      '/r2/x.md',
+      '/r2/y.md',
+      '/r1/b.md',
+      '/r1/c.md',
+    ]);
+
+    // 不存在的目录 -> 空
+    expect(listRecentFiles({ dirs: ['nope'], limit: 10 })).toEqual([]);
+
+    // 返回字段够前端渲染列表项
+    const [top] = listRecentFiles({ dirs: ['r2'], limit: 1 });
+    expect(top).toMatchObject({ path: '/r2/x.md', title: 'x', dir: '/r2', name: 'x.md' });
+    expect(top.mtimeMs).toBe(BASE + 900);
   });
 });

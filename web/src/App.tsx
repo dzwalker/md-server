@@ -12,6 +12,7 @@ import { ActivityBar } from '@/components/activity-bar';
 import { Sidebar } from '@/components/sidebar';
 import { DocView } from '@/components/doc-view';
 import { CommandPalette } from '@/components/command-palette';
+import { OpenedSwitcher } from '@/components/opened-switcher';
 import { useTheme } from '@/hooks/use-theme';
 import { useIsMobile } from '@/hooks/use-is-mobile';
 import type { ActivityId } from '@/lib/activities';
@@ -52,6 +53,7 @@ function Shell() {
   const [active, setActive] = useState<ActivityId>('explorer');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const sidebarRef = useRef<PanelImperativeHandle | null>(null);
   const { theme, toggle } = useTheme();
@@ -84,10 +86,17 @@ function Shell() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'p') {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key.toLowerCase() === 'p') {
         e.preventDefault();
+        setSwitcherOpen(false);
         setPaletteOpen((v) => !v);
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+      } else if (mod && e.key.toLowerCase() === 'o') {
+        // 浏览器默认「打开本地文件」对话框；preventDefault 可拦截。
+        e.preventDefault();
+        setPaletteOpen(false);
+        setSwitcherOpen((v) => !v);
+      } else if (mod && e.key.toLowerCase() === 'b') {
         e.preventDefault();
         toggleSidebar();
       }
@@ -169,6 +178,7 @@ function Shell() {
     <>
       {layout}
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <OpenedSwitcher open={switcherOpen} onOpenChange={setSwitcherOpen} />
     </>
   );
 }

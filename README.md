@@ -9,6 +9,7 @@
 - SQLite 全文检索（FTS5 trigram）+ 中文拼音检索
 - 标签 / 双链 backlink / outlink / 关系图谱
 - 收藏置顶 / 待办 / 到期任务（`(due: YYYY-MM-DD)`，供 n8n 到期提醒消费）
+- 命令面板：`⌘P` 搜索（空态列当前空间最近更新的 20 篇）、`⌘O` 已打开文档看板（按目录分列，方向键导航）
 - 语义（向量）检索（`multilingual-e5-small`）
 - MCP 服务（SSE，端口 3002）：`list_allowed_directories` / `search_docs` / `read_doc` / `search_semantic` / `list_tags` / `list_todos` / `list_due_tasks`
 
