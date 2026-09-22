@@ -34,7 +34,9 @@
 - [x] `README.md` 功能列表加命令面板一行；`specs/README.md` 现状补一条。
 - [x] `.dsh/skills/code-map` 前端结构刷新（原「public/index.html 单文件」已过时）并登记 `/api/recent`。
 
-## T6 交付（待用户确认）
+## T6 交付 ✅
 
-- [ ] 提交本次改动（仅本 session 涉及文件；不带上一次会话遗留的「下载 md 文件」未提交改动）。
-- [ ] `docker compose up -d --build` 重建容器，https://md.zwalker.me 验证 ⌘P 空态与 ⌘O 看板。
+- [x] 提交并推送 `origin/main`：`feac444`（下载 md 原文件，上一次会话遗留需求）+ `8697634`（本次命令面板两功能）。
+- [x] `docker compose up -d --build` 重建容器：启动 `index ready (incremental, 0 changed, 3382ms)`，`files=2483 / sets=4`。
+- [x] 线上容器内实测：`/api/recent` 200 / 20 条 / 未知目录 `[]`；`web/dist/assets/index-Dj3D02CR.js` 与本地构建产物 **md5 一致**（`40615fc0…`），产物内含「最近更新 / 已打开的文档 / 切换目录 / 下载 Markdown 文件」。
+- [ ] 用户在 https://md.zwalker.me 实际点击确认视觉效果（该站有登录网关，助手不代验证）。
