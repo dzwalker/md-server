@@ -36,6 +36,14 @@
 - [x] Given ⌘P 已打开，When 按 ⌘O，Then ⌘P 关闭（两者互斥）。
 - [x] Given 全程操作，Then 浏览器无 console error / pageerror。
 
+**B2. ⌘O 视觉缺陷修正（2026-09-22 用户上线后反馈）**
+
+- [x] Given 打开 ⌘O，When 读 `document.activeElement`，Then 焦点在弹层内的**面板容器**上（`tabindex=-1`），而不是列表第一项；列表项无任何可见焦点框（`outline` 全为 none）。修复前：Radix 自动聚焦第一项，`outline auto 1px` 灰框**永远停在第一项**（方向键只改状态、不搬 DOM 焦点）。
+- [x] Given 选中某项，Then 选中底色为**实心主色**（浅色 `oklch(0.205)` / 深色 `oklch(0.922)`），与列底真实合成亮度差 ΔL 0.96 / 0.77，文字对比度 17.2:1 / 14.2:1。修复前：`bg-accent` = `oklch(0.97 0 0)` 叠在同为近白的列底上，ΔL 仅约 0.018（等于看不见）。
+- [x] Given ⌘P 打开（空态最近更新 / 搜索结果两个分支），Then 选中项同样是实心主色，标题对比度 17.2:1（浅）/14.2:1（深）、路径副标题按 70% alpha 合成后 8.8:1（浅）/6.0:1（深）；输入框仍保持焦点不被抢。
+
+- [x] Given 看板打开，When 切换列，Then 「当前列」用**底色**区分（浅色 `#e7e7e7` vs `#fbfbfb`；深色 `#292929` vs `#1b1b1b`）且跟着 ←→ 移动，不再用 1px 深色 ring（视觉上像一条多余边框）。
+
 **C. 工程门禁**
 
 - [x] 后端 `npx tsc --noEmit`、`npm test`（22 个用例）全绿；新增 `listRecentFiles` 用例（RED → GREEN）。

@@ -2,15 +2,20 @@ import { useEffect, useState } from 'react';
 import { Command } from 'cmdk';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { api } from '@/lib/api';
-import { relativeTime } from '@/lib/utils';
+import { relativeTime, cn } from '@/lib/utils';
 import type { RecentFile, SearchResult } from '@/lib/types';
 import { useStore } from '@/state/store';
 
 /** 空态「最近更新」显示条数。 */
 const RECENT_LIMIT = 20;
 
+// 选中态用实心主色：本主题的 --accent 是 oklch(0.97 0 0) 近白，叠在近白面板上几乎看不见。
+// group 供子元素（路径副标题）在选中时切换前景色。
 const ITEM_CLASS =
-  'cursor-pointer rounded px-2 py-1.5 data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground';
+  'group cursor-pointer rounded px-2 py-1.5 data-[selected=true]:bg-primary data-[selected=true]:text-primary-foreground';
+
+const ITEM_SUB_CLASS =
+  'truncate text-xs text-muted-foreground group-data-[selected=true]:text-primary-foreground/70';
 
 const GROUP_HEADING_CLASS =
   '[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-normal [&_[cmdk-group-heading]]:text-muted-foreground';
@@ -116,7 +121,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   >
                     <div className="flex flex-col gap-0.5">
                       <span className="truncate text-sm">{r.title || r.path}</span>
-                      <span className="truncate text-xs text-muted-foreground">{r.path}</span>
+                      <span className={ITEM_SUB_CLASS}>{r.path}</span>
                     </div>
                   </Command.Item>
                 ))
@@ -140,11 +145,11 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     <div className="flex flex-col gap-0.5">
                       <div className="flex items-baseline gap-2">
                         <span className="min-w-0 flex-1 truncate text-sm">{r.title || r.name}</span>
-                        <span className="shrink-0 text-xs text-muted-foreground">
+                        <span className={cn('shrink-0', ITEM_SUB_CLASS)}>
                           {relativeTime(r.mtimeMs)}
                         </span>
                       </div>
-                      <span className="truncate text-xs text-muted-foreground">{r.path}</span>
+                      <span className={ITEM_SUB_CLASS}>{r.path}</span>
                     </div>
                   </Command.Item>
                 ))}

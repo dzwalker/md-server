@@ -40,3 +40,15 @@
 - [x] `docker compose up -d --build` 重建容器：启动 `index ready (incremental, 0 changed, 3382ms)`，`files=2483 / sets=4`。
 - [x] 线上容器内实测：`/api/recent` 200 / 20 条 / 未知目录 `[]`；`web/dist/assets/index-Dj3D02CR.js` 与本地构建产物 **md5 一致**（`40615fc0…`），产物内含「最近更新 / 已打开的文档 / 切换目录 / 下载 Markdown 文件」。
 - [ ] 用户在 https://md.zwalker.me 实际点击确认视觉效果（该站有登录网关，助手不代验证）。
+
+## T7 ⌘O 视觉缺陷修正（2026-09-22，用户反馈）
+
+- [x] 复现定位（探针，不截图）：`document.activeElement` = 列表第一项按钮、`:focus-visible` = true、`outline auto 1px`；
+      `bg-accent` = `oklch(0.97 0 0)` 与列底（`oklch(0.97/0.4)` 叠白）真实合成亮度差仅 ~0.018。
+- [x] 修：`onOpenAutoFocus` 里 `preventDefault()` 并把焦点交给面板容器（`tabIndex={-1}` + `outline-none`）。
+- [x] 修：选中项改实心 `bg-primary text-primary-foreground`（浅/深色自动反相），当前文档圆点随之反相。
+- [x] 修：当前列改用底色 `bg-primary/10` 区分（去掉 1px 深色 ring），列头文字加深。
+- [x] 验证：浅色 + 深色各 9 项断言通过（ΔL / 文字对比度 / 无 outline / 当前列可区分 / 无 console error）；
+      既有 24 + 7 + 5 项回归全绿；`tsc --noEmit` + `npm test`(22) + `web npm run build` 通过。
+- [x] 同根因一并统一 ⌘P 命令面板：`data-[selected=true]:bg-primary` + 副标题 `group-data-[selected=true]:text-primary-foreground/70`（避免实心底上灰字看不清）；
+      浅/深色 × 空态/搜索 共 22 项断言通过（标题 17.2/14.2:1，副标题按 alpha 合成 8.8/6.0:1，焦点仍在输入框）。
