@@ -13,9 +13,10 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { X, Star, ListTree, Layers, PanelLeftOpen } from 'lucide-react';
+import { X, Star, ListTree, Layers, PanelLeftOpen, Download } from 'lucide-react';
 import { useStore, type OpenDoc } from '@/state/store';
 import { api } from '@/lib/api';
+import { downloadBlob } from '@/lib/download';
 import type { Backlink, RenderResult } from '@/lib/types';
 import { cn, stripMdExt } from '@/lib/utils';
 import { renderExtras, highlightContent } from '@/lib/markdown-extras';
@@ -112,6 +113,7 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   const [backlinks, setBacklinks] = useState<Backlink[]>([]);
   const [outlinks, setOutlinks] = useState<string[]>([]);
   const [tocOpen, setTocOpen] = useState(true);
+  const [downloading, setDownloading] = useState(false);
 
   // 工具型「文档」（如图谱）用保留路径 /__tools__/... 打开为 tab
   const isTool = !!activeDoc && activeDoc.startsWith('/__tools__/');
@@ -295,6 +297,21 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     }
   }
 
+  // 下载当前文档的原始 md 文件（走 /api/files/*，拿到的是磁盘原文而不是渲染结果）。
+  async function onDownload() {
+    if (!activeDoc || isTool || downloading) return;
+    const fallback = activeDoc.split('/').pop() || 'document.md';
+    setDownloading(true);
+    try {
+      const f = await api.rawFile(activeDoc);
+      downloadBlob(new Blob([f.content], { type: 'text/markdown;charset=utf-8' }), f.name || fallback);
+    } catch (err) {
+      console.warn('下载失败：', err);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   // TOC 响应式布局：宽→md 固定 980；中→压缩 md；窄→TOC 悬浮覆盖
   const measured = contentWidth > 0;
   const w = measured ? contentWidth : 4096;
@@ -357,15 +374,27 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
       <div className="flex shrink-0 items-center gap-1.5 px-5 pb-2 pt-3">
         <span className="min-w-0 flex-1 truncate text-base font-semibold">{title}</span>
         {activeDoc && !isTool && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn('h-8 w-8', !fav && 'text-muted-foreground')}
-            onClick={() => toggleFavorite(activeDoc)}
-            title="收藏 / 取消收藏"
-          >
-            <Star className={cn('h-4 w-4', fav && 'fill-current text-yellow-500')} />
-          </Button>
+          <>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn('h-8 w-8', !fav && 'text-muted-foreground')}
+              onClick={() => toggleFavorite(activeDoc)}
+              title="收藏 / 取消收藏"
+            >
+              <Star className={cn('h-4 w-4', fav && 'fill-current text-yellow-500')} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground"
+              onClick={onDownload}
+              disabled={downloading}
+              title="下载 Markdown 文件"
+            >
+              <Download className="h-4 w-4" />
+            </Button>
+          </>
         )}
         <Button
           variant="ghost"

@@ -2,6 +2,7 @@ import type {
   Backlink,
   Favorite,
   GraphData,
+  RawFile,
   RenderResult,
   SearchResult,
   SemanticResult,
@@ -77,6 +78,8 @@ export const api = {
   saveSets: (sets: SpaceSet[]) => post<SetsResponse>('/api/sets', sets),
 
   render: (path: string) => get<RenderResult>(`/api/render${path}`),
+  // 原始文件内容（后端 /api/files/* 读磁盘原文），用于「下载 md 文件」。
+  rawFile: (path: string) => get<RawFile>(`/api/files${path}`),
   stat: (path: string) => get<{ exists: boolean; path: string; mtimeMs?: number; size?: number }>(`/api/stat?path=${encodeURIComponent(path)}`),
   backlinks: (path: string) => get<Backlink[]>(`/api/backlinks${path}`),
   outlinks: (path: string) => get<string[]>(`/api/outlinks${path}`),

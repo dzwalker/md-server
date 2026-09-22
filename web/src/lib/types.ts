@@ -60,6 +60,19 @@ export interface RenderResult {
   [key: string]: unknown;
 }
 
+/** /api/files/* 的响应：文件元信息 + 磁盘原文。 */
+export interface RawFile {
+  urlPath: string;
+  name: string;
+  title: string;
+  dir: string;
+  content: string;
+  fsPath?: string;
+  mtimeMs?: number;
+  size?: number;
+  [key: string]: unknown;
+}
+
 export interface Backlink {
   path: string;
   title?: string;

@@ -9,6 +9,8 @@
 //    一旦画进 canvas，浏览器会污染画布，toBlob 抛 SecurityError。
 //    所以位图导出要先用 htmlLabels:false 重新渲染一版纯 <text> 的图。
 
+import { downloadBlob } from './download';
+
 interface MermaidLike {
   render: (id: string, code: string) => Promise<{ svg: string; bindFunctions?: (el: HTMLElement) => void }>;
 }
@@ -62,23 +64,12 @@ function resolveBackground(): string {
   return '#ffffff';
 }
 
-function download(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
 /** 导出矢量 SVG（与正文所见一致，标签仍是 foreignObject HTML）。 */
 export function exportMermaidSvg(container: HTMLElement, name: string) {
   const svgEl = container.querySelector('svg');
   if (!svgEl) return;
   const data = serializeSvg(svgEl, false);
-  download(new Blob([data], { type: 'image/svg+xml;charset=utf-8' }), name + '.svg');
+  downloadBlob(new Blob([data], { type: 'image/svg+xml;charset=utf-8' }), name + '.svg');
 }
 
 /**
@@ -124,7 +115,7 @@ export async function exportMermaidRaster(source: string, name: string, format: 
       canvas.toBlob(resolve, format === 'png' ? 'image/png' : 'image/jpeg', format === 'jpg' ? 0.92 : undefined),
     );
     if (!blob) return false;
-    download(blob, name + '.' + format);
+    downloadBlob(blob, name + '.' + format);
     return true;
   } finally {
     URL.revokeObjectURL(url);
