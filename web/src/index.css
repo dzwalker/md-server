@@ -188,65 +188,109 @@
 
 /* ==== 笔记（`> note: 内容` 一行，服务端渲染成卡片；见 specs/notes/）==== */
 .md-content .md-note {
+  --note-accent: var(--md-note-border, var(--md-accent, #d97706));
+  position: relative;
   margin: 0.7em 0;
-  padding: 7px 12px 8px;
-  border-left: 3px solid var(--md-note-border, var(--md-accent, #d97706));
-  border-radius: 0 6px 6px 0;
+  padding: 7px 12px 8px 14px;
+  border-left: 3px solid var(--note-accent);
+  border-radius: 0 9px 9px 0;
   background: var(--md-note-bg, var(--md-quote, var(--muted)));
   color: var(--md-fg, var(--foreground));
   font-size: 0.95em;
+  transition: box-shadow 0.12s ease;
 }
+.md-content .md-note:hover { box-shadow: 0 1px 6px rgb(0 0 0 / 6%); }
 .md-content .md-note-label {
+  display: inline-block;
+  margin-bottom: 2px;
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.06em;
-  color: var(--md-note-border, var(--md-accent, #d97706));
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+  color: var(--note-accent);
   user-select: none;
 }
-.md-content .md-note-body { margin-top: 1px; }
+.md-content .md-note-body { line-height: 1.7; }
 .md-content .md-note-body > :first-child { margin-top: 0; }
 .md-content .md-note-body > :last-child { margin-bottom: 0; }
 
-/* 就地编辑器（保存 / 取消） */
-.md-content .md-note-editor { margin-top: 6px; }
+/* 就地编辑器（保存 / 取消）：输入区自己是一块「田」，聚焦时整块给环，而不是给 textarea 描边 */
+.md-content .md-note-editor { margin-top: 8px; }
+.md-note-field {
+  background: var(--md-bg, var(--background, #fff));
+  border: 1px solid color-mix(in srgb, var(--note-accent) 30%, var(--border));
+  border-radius: 9px;
+  transition: border-color 0.13s ease, box-shadow 0.13s ease;
+}
+.md-note-field:hover { border-color: color-mix(in srgb, var(--note-accent) 50%, var(--border)); }
+.md-note-field:focus-within {
+  border-color: var(--note-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--note-accent) 16%, transparent);
+}
 .md-note-input {
   display: block;
   width: 100%;
   box-sizing: border-box;
-  min-height: 30px;
-  padding: 5px 8px;
+  min-height: 34px;
+  padding: 7px 10px;
   font: inherit;
   font-size: 0.95em;
-  line-height: 1.5;
+  line-height: 1.6;
   color: var(--md-fg, var(--foreground));
-  background: var(--md-bg, var(--background, #fff));
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
   outline: none;
-  resize: vertical;
+  resize: none;
+  overflow: hidden; /* 不出现默认滚动条；只有粘贴超长内容时由 JS 放开 */
+  caret-color: var(--note-accent);
 }
-.md-note-input:focus { border-color: var(--md-note-border, var(--md-accent, #d97706)); }
-.md-note-actions { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
-.md-note-error { flex: 1; min-width: 0; font-size: 12px; color: var(--destructive, #dc2626); }
+.md-note-input::placeholder { color: var(--md-muted, var(--muted-foreground)); opacity: 0.75; }
+.md-note-input::selection { background: color-mix(in srgb, var(--note-accent) 22%, transparent); }
+.md-note-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding-left: 2px;
+}
+.md-note-status {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--md-muted, var(--muted-foreground));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: none;
+}
+.md-note-status-error { color: var(--destructive, #dc2626); }
 .md-note-btn {
   flex: none;
-  padding: 3px 10px;
+  padding: 4px 12px;
   font-size: 12px;
+  font-weight: 500;
   line-height: 1.5;
-  color: var(--foreground);
-  background: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  color: var(--md-fg, var(--foreground));
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
   cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, opacity 0.12s ease;
 }
-.md-note-btn:hover { background: var(--accent); }
-.md-note-btn:disabled { opacity: 0.6; cursor: default; }
+.md-note-btn:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
+.md-note-btn:active { transform: translateY(0.5px); }
+.md-note-btn:focus-visible { outline: 2px solid var(--note-accent); outline-offset: 1px; }
+.md-note-btn:disabled { opacity: 0.55; cursor: default; }
 .md-note-btn-primary {
   color: #fff;
-  background: var(--md-note-border, var(--md-accent, #d97706));
-  border-color: transparent;
+  background: var(--note-accent);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
 }
-.md-note-btn-primary:hover { background: var(--md-note-border, var(--md-accent, #d97706)); filter: brightness(1.08); }
+.md-note-btn-primary:hover {
+  background: color-mix(in srgb, var(--note-accent) 88%, #000);
+}
 
 /* ==== mermaid 图表 + 全屏查看 ==== */
 .mermaid-wrap { position: relative; }

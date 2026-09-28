@@ -90,24 +90,40 @@ function mountEditor(host: HTMLElement, opts: MountOptions): void {
   const wrap = document.createElement('div');
   wrap.className = 'md-note-editor';
   wrap.innerHTML =
-    '<textarea class="md-note-input" rows="1" spellcheck="false"></textarea>' +
+    '<div class="md-note-field">' +
+    '<textarea class="md-note-input" rows="1" spellcheck="false" ' +
+    'placeholder="写点什么…支持 **加粗**、[[双链]]、$公式$"></textarea>' +
+    '</div>' +
     '<div class="md-note-actions">' +
-    '<span class="md-note-error"></span>' +
-    '<button type="button" class="md-note-btn md-note-btn-primary" data-act="save">保存</button>' +
+    '<span class="md-note-status"></span>' +
     '<button type="button" class="md-note-btn" data-act="cancel">取消</button>' +
+    '<button type="button" class="md-note-btn md-note-btn-primary" data-act="save">保存</button>' +
     '</div>';
 
   const ta = wrap.querySelector('textarea') as HTMLTextAreaElement;
-  const errEl = wrap.querySelector('.md-note-error') as HTMLElement;
+  const statusEl = wrap.querySelector('.md-note-status') as HTMLElement;
   const saveBtn = wrap.querySelector('[data-act="save"]') as HTMLButtonElement;
   const cancelBtn = wrap.querySelector('[data-act="cancel"]') as HTMLButtonElement;
 
   let closed = false;
   let saving = false;
 
+  const HINT = 'Enter 保存 · Esc 取消';
+
+  /** 左下角一行小字：平时是快捷键提示，出错时变红显示原因（同一个槽位，不跳版）。 */
+  function setStatus(text: string, isError = false) {
+    statusEl.textContent = text;
+    statusEl.classList.toggle('md-note-status-error', isError);
+  }
+
+  // 单行语法：内容永远不会超过 max-height（换行会被保存时折叠成空格），
+  // 所以正常情况下不出现滚动条——只有粘贴超长内容时才退化为可滚动。
+  const MAX_INPUT_HEIGHT = 240;
   const autosize = () => {
     ta.style.height = 'auto';
-    ta.style.height = `${Math.min(ta.scrollHeight, 240)}px`;
+    const next = Math.min(ta.scrollHeight, MAX_INPUT_HEIGHT);
+    ta.style.height = `${next}px`;
+    ta.style.overflowY = ta.scrollHeight > MAX_INPUT_HEIGHT ? 'auto' : 'hidden';
   };
 
   function teardown() {
@@ -126,7 +142,7 @@ function mountEditor(host: HTMLElement, opts: MountOptions): void {
     if (saving || closed) return;
     const text = ta.value.trim();
     if (!text) {
-      errEl.textContent = '笔记内容不能为空';
+      setStatus('笔记内容不能为空', true);
       ta.focus();
       return;
     }
@@ -134,7 +150,7 @@ function mountEditor(host: HTMLElement, opts: MountOptions): void {
     saveBtn.disabled = true;
     cancelBtn.disabled = true;
     saveBtn.textContent = '保存中…';
-    errEl.textContent = '';
+    setStatus(HINT);
     try {
       await opts.onSave(text);
       teardown();
@@ -143,13 +159,17 @@ function mountEditor(host: HTMLElement, opts: MountOptions): void {
       saveBtn.disabled = false;
       cancelBtn.disabled = false;
       saveBtn.textContent = '保存';
-      errEl.textContent = errorText(e);
+      setStatus(errorText(e), true);
       ta.focus();
     }
   }
 
   ta.value = opts.text;
-  ta.addEventListener('input', autosize);
+  setStatus(HINT);
+  ta.addEventListener('input', () => {
+    if (statusEl.classList.contains('md-note-status-error')) setStatus(HINT);
+    autosize();
+  });
   ta.addEventListener('keydown', (e) => {
     // 中文输入法组字过程中的 Enter/Esc 不算提交/取消
     if (e.isComposing || e.keyCode === 229) return;
@@ -158,7 +178,8 @@ function mountEditor(host: HTMLElement, opts: MountOptions): void {
       cancel();
       return;
     }
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // 笔记是单行语法：Enter 直接保存（不换行）
+    if (e.key === 'Enter') {
       e.preventDefault();
       void save();
     }

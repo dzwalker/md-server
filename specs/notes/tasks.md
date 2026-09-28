@@ -45,3 +45,13 @@
 - [x] 线上验证：`POST /api/notes` 已生效（缺 path / 不存在路径 → 400，未触碰任何文件）；`/api/render` 已带 `data-line-start/end`；前端 bundle `assets/index-DgkiBTy4.js` 含「插入笔记」与 `api/notes`。
 - [x] 提交并推送：`54ae46a` → `origin/main`（连同此前未提交的 CJK 强调 + 资源管理器右键菜单 + KaTeX 字体资源）。
 - [ ] 用户浏览器确认视觉与手感（https://md.zwalker.me，需刷新拿新 bundle）。
+
+## T7 修复轮（2026-09-28，用户反馈）
+
+- [x] 定位「保存后跳一下」的根因：`.md-content > *` 的 `content-visibility: auto` + 整篇 innerHTML 替换
+      丢掉「记住的真实尺寸」→ 屏外块退回 28px 估值；对照实验（不改内容只替换 innerHTML）漂移 114px。
+- [x] 新增 `web/src/lib/scroll-anchor.ts`：`captureScrollAnchor` / `findBlockByLine` / `restoreScrollAnchor` / `shiftAnchorLine`。
+- [x] `doc-view.tsx` 接入：保存笔记、外部改动刷新、mermaid 换肤前 mark，`useLayoutEffect` + `renderExtras` 完成后两次 restore；锚点绑定 `activeDoc`。
+- [x] 编辑器样式重做：`.md-note-field`（聚焦光环）+ 无滚动条 textarea + `.md-note-status`（快捷键提示/错误同槽位）+ 轻量按钮；颜色走 md 主题变量。
+- [x] 验证（625 行长文档，`:3098` 实例）：插入/编辑/删除保存后视口首块漂移 ≤1px（`top 1→2` / `-20→-20` / `21→21`）；外部改动刷新 1px；编辑器 `scrollHeight <= clientHeight` 无滚动条、聚焦有环、明暗主题截图核对。
+- [x] 回归：完整笔记用例 23/23 通过（选择器随新 DOM 更新为 `.md-note-status-error`）；`npx tsc --noEmit` + `npm test` 54 用例 + `web npm run build` 全过。

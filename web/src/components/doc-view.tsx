@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from 'react';
 import {
   DndContext,
   closestCenter,
@@ -28,6 +28,12 @@ import {
   startNoteEditor,
   type NoteContextTarget,
 } from '@/lib/notes';
+import {
+  captureScrollAnchor,
+  restoreScrollAnchor,
+  shiftAnchorLine,
+  type ScrollAnchor,
+} from '@/lib/scroll-anchor';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -144,6 +150,37 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   const [notice, setNotice] = useState<string | null>(null);
   const noticeTimerRef = useRef<number | null>(null);
 
+  // 正文整篇重注入时的滚动锚点：长文档里 content-visibility 的「记忆尺寸」会随替换丢失，
+  // 不做补偿的话保存笔记后可视位置会漂移（见 lib/scroll-anchor.ts）。
+  const scrollAnchorRef = useRef<{ path: string; anchor: ScrollAnchor } | null>(null);
+
+  const markScrollAnchor = useCallback((shift?: (line: number) => number) => {
+    const el = contentRef.current;
+    const scroller = contentAreaRef.current;
+    if (!el || !scroller || !activeDoc) {
+      scrollAnchorRef.current = null;
+      return;
+    }
+    const anchor = captureScrollAnchor(el, scroller);
+    scrollAnchorRef.current = anchor
+      ? { path: activeDoc, anchor: shift ? { ...anchor, line: shift(anchor.line) } : anchor }
+      : null;
+  }, [activeDoc]);
+
+  const restoreScroll = useCallback(() => {
+    const pending = scrollAnchorRef.current;
+    const el = contentRef.current;
+    const scroller = contentAreaRef.current;
+    // 锚点必须属于当前文档：保存后立刻切文档时，不能把旧锚点套到新正文上。
+    if (!pending || pending.path !== activeDoc || !el || !scroller) return;
+    restoreScrollAnchor(el, scroller, pending.anchor);
+  }, [activeDoc]);
+
+  // 重注入发生在 React 提交阶段，这里在同一个布局帧里把锚点块钉回原位（不等绘制，避免闪一下）。
+  useLayoutEffect(() => {
+    restoreScroll();
+  }, [activeRender, restoreScroll]);
+
   // 工具型「文档」（如图谱）用保留路径 /__tools__/... 打开为 tab
   const isTool = !!activeDoc && activeDoc.startsWith('/__tools__/');
 
@@ -239,7 +276,11 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
         const cur = renderRef.current;
         if (!cur || cur.mtimeMs === s.mtimeMs) return;
         const r = await api.render(activeDoc);
-        if (alive) cacheRender(activeDoc, r);
+        if (alive) {
+          // 外部改动触发的整篇重注入：同样保住当前滚动位置。
+          markScrollAnchor();
+          cacheRender(activeDoc, r);
+        }
       } catch {
         /* ignore */
       }
@@ -249,7 +290,7 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
       alive = false;
       window.clearInterval(id);
     };
-  }, [activeDoc, cacheRender]);
+  }, [activeDoc, cacheRender, markScrollAnchor]);
 
   useEffect(() => {
     if (!activeDoc || activeDoc.startsWith('/__tools__/')) {
@@ -287,7 +328,12 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     let cancelled = false;
     const run = () => {
       if (cancelled) return;
-      void renderExtras(el);
+      // 数学/图表二次渲染还会改变块高：等它落地后再校正一次锚点，然后清掉本次锚点。
+      void renderExtras(el).then(() => {
+        if (cancelled) return;
+        restoreScroll();
+        scrollAnchorRef.current = null;
+      });
       highlightContent(el, activeQuery);
     };
     const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number }).requestIdleCallback;
@@ -298,7 +344,7 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     }
     const id = window.setTimeout(run, 0);
     return () => { cancelled = true; window.clearTimeout(id); };
-  }, [activeRender, activeQuery]);
+  }, [activeRender, activeQuery, restoreScroll]);
 
   // mermaid 主题切换后，把正文重置回服务端占位符并整体重渲染，让图表立即换肤。
   // 注意：只在主题真的变了时才执行——挂载时的正文渲染已由上面那个 effect 负责，
@@ -308,11 +354,15 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     prevMermaidThemeRef.current = mermaidTheme;
     const el = contentRef.current;
     if (!el || !activeRender) return;
+    markScrollAnchor();
     closeActiveNoteEditor();
     el.innerHTML = activeRender.html;
-    void renderExtras(el);
+    void renderExtras(el).then(() => {
+      restoreScroll();
+      scrollAnchorRef.current = null;
+    });
     highlightContent(el, activeQuery);
-  }, [mermaidTheme]);
+  }, [mermaidTheme, markScrollAnchor, restoreScroll]);
 
   // 切换文档时，把当前 tab 滚动到可见位置
   useEffect(() => {
@@ -363,13 +413,16 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   }, [activeDoc, cacheRender]);
 
   // 写笔记：带上渲染时看到的 mtimeMs 做乐观锁（服务端不一致会返回 409，绝不覆盖别处改动）。
+  // 写入会让这一行插/改/删，紧接着正文整篇重注入——先记下滚动锚点，
+  // 并按插入/删除造成的行号位移修正锚点行，保证保存后视觉位置不跳。
   const submitNote = useCallback(
     async (payload: Omit<NoteRequest, 'path' | 'mtimeMs'>) => {
       if (!activeDoc) throw new Error('没有打开的文档');
+      markScrollAnchor((line) => shiftAnchorLine(line, payload));
       await api.saveNote({ path: activeDoc, mtimeMs: activeRender?.mtimeMs, ...payload });
       await refreshActiveRender();
     },
-    [activeDoc, activeRender, refreshActiveRender],
+    [activeDoc, activeRender, refreshActiveRender, markScrollAnchor],
   );
 
   // 正文右键：已存在的笔记 → 「编辑 / 删除」；其它位置 → 只有「插入笔记」。

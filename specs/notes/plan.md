@@ -43,7 +43,34 @@ POST /api/notes  { path, op: 'insert'|'update'|'delete', afterLine?, line?, text
   - 切文档 / mermaid 主题重渲染前调用 `closeActiveNoteEditor()`，避免残留在被替换的 DOM 上。
 - `web/src/index.css`：`.md-note` 卡片、`.md-note-label`、`.md-note-input` / `.md-note-actions` / `.md-note-btn` 样式，颜色走现有 md 主题变量（`--md-note-border` 缺省回退 `--md-accent`）。
 
-### 5) 文档
+### 5) 修复轮：保存后「页面跳一下」+ 编辑器样式（2026-09-28 追加）
+
+**跳位的根因**（实测定位，不是猜的）：正文是服务端 HTML 整篇注入，而 `.md-content > *` 开着
+`content-visibility: auto`（`contain-intrinsic-size: auto 28px`）来跳过屏外块的布局。整篇替换会丢
+掉浏览器「记住的真实尺寸」，屏外块退回 28px 估值 → 同一段内容在新 DOM 里的位置整体偏移。
+在 625 行的长文档里做对照实验：**裸 `content.innerHTML = content.innerHTML`（不改任何内容）就让
+标记段落漂移了 114px，而滚动容器的 scrollTop 完全没变**——这就是用户看到的「跳一下」。
+
+**修法**：新增 `web/src/lib/scroll-anchor.ts`——替换前记下「视口内第一个块」的行号与它相对滚动容器
+顶部的位置，替换后把同一个逻辑块钉回原位置（行号位移按 op 补偿：插在 afterLine 之后 → 其下 +1；
+删掉 line → 其下 -1）。接入点：
+
+- `submitNote`（保存笔记）与 mtime 轮询（外部改动刷新）前 `markScrollAnchor()`；
+- `useLayoutEffect([activeRender])` 在 React 提交后的同一布局帧里校正（不等绘制，不会闪）；
+- `renderExtras`（数学/图表二次渲染）结束后再校正一次并清掉锚点；
+- mermaid 主题换肤那条手工 `innerHTML` 路径同样处理；
+- 锚点绑定 `activeDoc`：保存后立刻切文档不会把旧锚点套到新正文上。
+
+实测：插入/编辑/删除三种操作，视口首块位置漂移 ≤1px（对比修复前 114px）；外部改动刷新 1px。
+
+**编辑器样式**：输入区改为「田」字结构——`.md-note-field` 负责边框与聚焦光环（`focus-within` +
+`color-mix` 淡环），`.md-note-input` 透明无边框、`resize: none`、`overflow: hidden`（不再出现默认
+滚动条，只有粘贴超长内容时 JS 才放开为可滚动）；左下角一个 `.md-note-status` 槽位平时显示
+「Enter 保存 · Esc 取消」、出错变红显示原因（同槽位不跳版）；按钮改为轻量 ghost + accent 实心，
+颜色全部走 `--md-note-border`/`--md-accent`，明暗主题与 4 套 md 主题都成立。笔记卡片本身也补了
+`--note-accent` 变量、hover 阴影与更松的行距。
+
+### 6) 文档
 
 - 本 spec 三件套；`specs/README.md` 现状列表；`README.md` 功能；`AGENTS.md` 分层表 + 「生产数据只读」原则的精确例外；`.dsh/skills/code-map/SKILL.md` 结构表。
 
@@ -51,7 +78,7 @@ POST /api/notes  { path, op: 'insert'|'update'|'delete', afterLine?, line?, text
 
 - **唯一越过只读边界的地方**：新增 `POST /api/notes`，能力被限制在「笔记行」的增/改/删，且带 mtime 乐观锁；没有通用写接口。
 - 渲染增加 `data-line-*` 属性（每个顶层块约 +40 字节 HTML；`/api/render` 有 br 压缩，实测可忽略）；`> note:` 行从普通引用块变为笔记卡片（当前 4 个空间无历史笔记行，无存量影响）。
-- 前端新增 1 个 lib 文件、`doc-view.tsx` 新增约 150 行；依赖零新增（`radix-ui`、`lucide-react` 已在依赖内）。
+- 前端新增 2 个 lib 文件（`notes.ts`、`scroll-anchor.ts`）、`doc-view.tsx` 新增约 200 行；依赖零新增（`radix-ui`、`lucide-react` 已在依赖内）。
 - 后端新增 1 个模块 + 2 个测试文件；索引/检索行为不变（笔记文本照常进 FTS）。
 - 上线需 `docker compose up -d --build`（`web/dist` 在镜像内，未挂载）。
 
@@ -64,10 +91,12 @@ POST /api/notes  { path, op: 'insert'|'update'|'delete', afterLine?, line?, text
 | 中文输入法回车误提交 | `keydown` 里判 `e.isComposing` / `keyCode === 229` |
 | 右键菜单抢焦点导致无法输入 | `modal={false}` + `onCloseAutoFocus` preventDefault；e2e 断言「编辑器自动聚焦」 |
 | `> note:` 与普通引用块冲突 | 识别规则要求 `note:` 紧跟 `>`；`> notes:`、四空格缩进代码块都有单测断言不受影响 |
-| 回滚 | 纯新增（`src/notes.ts`、`web/src/lib/notes.ts`、路由、渲染规则、样式）；回退本 spec 涉及文件即可，无需数据迁移；已产生的笔记行只是普通引用块，不会损坏文档 |
+| 长文档整篇重注入导致可视位置漂移（「保存后跳一下」） | 滚动锚点补偿（先记视口首块行号 + 相对位置，替换后钉回），实测插入/编辑/删除漂移 ≤1px；`content-visibility` 的估值问题本身保留（那是长文档首屏性能的既有设计），但保存瞬间不再跳 |
+| 回滚 | 纯新增（`src/notes.ts`、`web/src/lib/notes.ts`、`web/src/lib/scroll-anchor.ts`、路由、渲染规则、样式）；回退本 spec 涉及文件即可，无需数据迁移；已产生的笔记行只是普通引用块，不会损坏文档 |
 
 ## 验证方式
 
 1. `npx tsc --noEmit` + `npm test` + `cd web && npm run build`。
 2. 临时 `:3099` 实例（fixture `/tmp/md-notes-fixture` + 独立 `MD_INDEX_DB`）+ 本机 Chromium **DOM 断言 23/23**（不截图）：菜单项、插到「该块之后的一行」、卡片渲染行内 md、原始 markdown 初值、取消不落盘、Esc/Enter、删除二次确认（含取消）、普通引用块不误判、外部改动后 409 不覆盖、无 console error。
-3. 视觉/手感由用户在浏览器确认（依用户偏好，不以截图代替人工确认）。
+3. 长文档跳位回归：625 行 fixture 上对比「裸重注入 vs 补偿后」（`content.innerHTML = content.innerHTML` 对照实验漂移 114px → 补偿后 ≤1px），并覆盖插入/编辑/删除/外部改动刷新四种触发。
+4. 视觉/手感由用户在浏览器确认（依用户偏好，不以截图代替人工确认）。

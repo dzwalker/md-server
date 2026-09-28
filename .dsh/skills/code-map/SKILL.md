@@ -37,6 +37,7 @@ whenToUse: 需要理解或修改 md-server 结构时（web/ 前端 React 工程�
 | 库 | `src/lib/download.ts`, `lib/clipboard.ts` | 下载 md 原文（`downloadDocByPath`，文档头与右键菜单共用）/ 复制到剪贴板（含非安全上下文降级） |
 | 库 | `src/lib/markdown-extras.ts`, `mermaid-*.ts`, `md-themes.ts` | 客户端二次渲染 katex/mermaid、导出、Markdown 主题 |
 | 库 | `src/lib/notes.ts` | 笔记右键定位（`resolveNoteContext`）+ 就地编辑器（`startInsertEditor` / `startNoteEditor` / `closeActiveNoteEditor`，命令式 DOM） |
+| 库 | `src/lib/scroll-anchor.ts` | 正文整篇重注入时的滚动位置保持（content-visibility 估值漂移的补偿，见 `specs/notes/plan.md` §5） |
 
 - 依赖 API：`/api/tree` `/api/files` `/api/files/*` `/api/render/*` `/api/stat` `/api/notes`（POST，唯一会写 md 的接口）`/api/search` `/api/search-semantic` `/api/recent` `/api/tags` `/api/backlinks/*` `/api/outlinks/*` `/api/graph` `/api/favorites` `/api/todos` `/api/sets` `/api/status` `/api/asset/*`
 - 渲染库：按需加载 `/media/*`（katex / mermaid / highlight）
