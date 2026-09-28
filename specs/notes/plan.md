@@ -63,6 +63,13 @@ POST /api/notes  { path, op: 'insert'|'update'|'delete', afterLine?, line?, text
 
 实测：插入/编辑/删除三种操作，视口首块位置漂移 ≤1px（对比修复前 114px）；外部改动刷新 1px。
 
+**写盘身份**（同轮修复，用户报障）：`fs.writeFileSync(tmp) + rename` 会把临时文件的 uid/gid/mode 带成新文件的身份——容器以 root 跑时，用户的 `dev:dev 644` md 就变成了 `root:root`，用户自己的编辑器随即读写被拒。修法：rename 前
+`fs.chownSync(tmp, before.uid, before.gid)` + `fs.chmodSync(tmp, before.mode & 0o777)`；进程 uid/gid
+已等于源文件属主时跳过（普通用户自托管场景），chown 失败则抛 500 **拒绝写入**，绝不静默换属主。
+验证：同一个镜像跑两个一次性容器（都挂 `/tmp` fixture，不碰生产数据），修前（镜像自带旧 src）→
+`root:root`，修后（挂当前 src）→ `dev:dev 644`，内容与权限位不变、无 `.mdnote-*.tmp` 残留；
+单测新增「属主/属组/权限位前后一致」与「不留临时文件」两条。
+
 **编辑器样式**：输入区改为「田」字结构——`.md-note-field` 负责边框与聚焦光环（`focus-within` +
 `color-mix` 淡环），`.md-note-input` 透明无边框、`resize: none`、`overflow: hidden`（不再出现默认
 滚动条，只有粘贴超长内容时 JS 才放开为可滚动）；左下角一个 `.md-note-status` 槽位平时显示
@@ -91,6 +98,7 @@ POST /api/notes  { path, op: 'insert'|'update'|'delete', afterLine?, line?, text
 | 中文输入法回车误提交 | `keydown` 里判 `e.isComposing` / `keyCode === 229` |
 | 右键菜单抢焦点导致无法输入 | `modal={false}` + `onCloseAutoFocus` preventDefault；e2e 断言「编辑器自动聚焦」 |
 | `> note:` 与普通引用块冲突 | 识别规则要求 `note:` 紧跟 `>`；`> notes:`、四空格缩进代码块都有单测断言不受影响 |
+| root 容器写笔记把用户文件变成 root:root（用户读写被拒） | 临时文件在 rename 前显式 `chown` 回源文件的 uid/gid 并 `chmod` 源权限位；进程身份已等于源属主时跳过；无法 chown 时**拒绝写入**（500）而不是悄悄换属主。root 容器对照实测：修前 root:root → 修后 dev:dev 644 |
 | 长文档整篇重注入导致可视位置漂移（「保存后跳一下」） | 滚动锚点补偿（先记视口首块行号 + 相对位置，替换后钉回），实测插入/编辑/删除漂移 ≤1px；`content-visibility` 的估值问题本身保留（那是长文档首屏性能的既有设计），但保存瞬间不再跳 |
 | 回滚 | 纯新增（`src/notes.ts`、`web/src/lib/notes.ts`、`web/src/lib/scroll-anchor.ts`、路由、渲染规则、样式）；回退本 spec 涉及文件即可，无需数据迁移；已产生的笔记行只是普通引用块，不会损坏文档 |
 

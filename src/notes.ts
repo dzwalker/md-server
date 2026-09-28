@@ -178,7 +178,11 @@ function assertWritable(fsPath: string) {
 
 /**
  * 落盘：读原文 → 改笔记行 → 临时文件 + rename 原子替换。
- * 只写这一条笔记涉及的行，其余内容逐字保持（含 CRLF、末尾换行、文件权限）。
+ * 只写这一条笔记涉及的行，其余内容逐字保持（含 CRLF、末尾换行）。
+ *
+ * **属主与权限必须显式搬过去**：临时文件是当前进程新建的，rename 会把它的
+ * uid/gid/mode 一起变成新的文件身份。容器以 root 跑时，这里不做处理就会把
+ * 用户 dev:dev 的 md 变成 root:root（用户那边的编辑器随即读写被拒）。
  */
 export function applyNoteToFile(fsPath: string, input: NoteOpInput): NoteOpResult {
   const before = assertWritable(fsPath);
@@ -199,6 +203,20 @@ export function applyNoteToFile(fsPath: string, input: NoteOpInput): NoteOpResul
   const tmp = `${fsPath}.mdnote-${process.pid}-${Date.now()}.tmp`;
   try {
     fs.writeFileSync(tmp, next, 'utf8');
+    // 新文件的属主默认是「当前进程」：与源文件不一致时必须显式改回去。
+    // 进程身份已经等于源文件属主时（普通用户自托管运行）不必、也无法 chown。
+    const sameOwner = currentUid() === before.uid && currentGid() === before.gid;
+    if (!sameOwner) {
+      try {
+        fs.chownSync(tmp, before.uid, before.gid);
+      } catch (e) {
+        throw new NoteError(
+          `无法保持文件属主（当前进程 ${currentUid()}:${currentGid()}，文件 ${before.uid}:${before.gid}）：` +
+            `${e instanceof Error ? e.message : String(e)}。拒绝写入以免把文件变成别的属主。`,
+          500,
+        );
+      }
+    }
     fs.chmodSync(tmp, before.mode & 0o777);
     fs.renameSync(tmp, fsPath);
   } catch (e) {
@@ -207,8 +225,17 @@ export function applyNoteToFile(fsPath: string, input: NoteOpInput): NoteOpResul
     } catch {
       /* ignore */
     }
+    if (e instanceof NoteError) throw e;
     throw new NoteError(`写入失败：${e instanceof Error ? e.message : String(e)}`, 500);
   }
   const after = fs.statSync(fsPath);
   return { line, mtimeMs: after.mtimeMs, size: after.size };
+}
+
+/** 当前进程的 uid/gid（Windows 上没有这两个 API，返回 -1 表示不参与属主比较）。 */
+function currentUid(): number {
+  return typeof process.getuid === 'function' ? process.getuid() : -1;
+}
+function currentGid(): number {
+  return typeof process.getgid === 'function' ? process.getgid() : -1;
 }

@@ -46,6 +46,15 @@
 - [x] 提交并推送：`54ae46a` → `origin/main`（连同此前未提交的 CJK 强调 + 资源管理器右键菜单 + KaTeX 字体资源）。
 - [ ] 用户浏览器确认视觉与手感（https://md.zwalker.me，需刷新拿新 bundle）。
 
+## T8 修复轮②：写盘把文件属主改成 root（用户报障，2026-09-28）
+
+- [x] 定位根因：`临时文件 + rename` 会把新建临时文件的 uid/gid 带成新文件身份；容器以 root 跑 → 用户 `dev:dev` 的 md 变 `root:root`，用户编辑器读写被拒（权限位是照抄原文件的，属主才是被换掉的）。
+- [x] `src/notes.ts`：rename 前 `chownSync(tmp, before.uid, before.gid)` + `chmodSync(tmp, before.mode & 0o777)`；进程身份已等于源属主时跳过；chown 失败 → 抛 500 拒绝写入（不静默换属主）。
+- [x] 单测新增：`写盘后属主、属组与权限与写前完全一致`、`写盘只改内容：目录里不留 .mdnote-*.tmp 残留`（`src/notes.test.ts` 21 用例）。
+- [x] root 容器对照验证（一次性容器 + `/tmp` fixture，不碰生产数据）：修前镜像自带旧 src → 宿主侧 `root:root 644`；修后挂当前 src → 宿主侧 `dev:dev 644`；内容 `> note: 属主验证` 正确写入、无临时文件残留。
+- [x] 影响面排查：全空间 `.md` 已无 root 属主（用户已自行修好 `learning-basics` 那条）；仓库里另有 `sets.json` 的写入是**原地写**（不换 inode，属主不受影响）。
+- [ ] 上线（需审批）：重新构建镜像并重建容器，然后按同一套一次性容器对照再验一次。
+
 ## T7 修复轮（2026-09-28，用户反馈）
 
 - [x] 定位「保存后跳一下」的根因：`.md-content > *` 的 `content-visibility: auto` + 整篇 innerHTML 替换

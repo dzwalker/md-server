@@ -160,6 +160,26 @@ describe('落盘 applyNoteToFile', () => {
     expect(fs.readFileSync(p, 'utf8')).toBe('a\n> note: y\n');
   });
 
+  // 回归：临时文件 + rename 会把属主/权限换成「当前进程新建文件」的身份。
+  // 容器以 root 跑时，曾经把用户的 dev:dev 644 md 变成 root:root（用户读写被拒）。
+  it('写盘后属主、属组与权限与写前完全一致', () => {
+    const p = writeTmp('owner.md', '# t\n\n正文\n');
+    fs.chmodSync(p, 0o644);
+    const before = fs.statSync(p);
+    applyNoteToFile(p, { op: 'insert', afterLine: 3, text: '属主回归' });
+    const after = fs.statSync(p);
+    expect(after.uid).toBe(before.uid);
+    expect(after.gid).toBe(before.gid);
+    expect(after.mode & 0o777).toBe(0o644);
+    expect(fs.readFileSync(p, 'utf8')).toBe('# t\n\n正文\n> note: 属主回归\n');
+  });
+
+  it('写盘只改内容：目录里不留 .mdnote-*.tmp 残留', () => {
+    const p = writeTmp('clean.md', 'a\n');
+    applyNoteToFile(p, { op: 'insert', afterLine: 1, text: 'x' });
+    expect(fs.readdirSync(tmpDir).filter((f) => f.includes('.mdnote-'))).toEqual([]);
+  });
+
   it('只允许 md 文件；文件不存在 404', () => {
     const txt = writeTmp('note.txt', 'a\n');
     expect(() => applyNoteToFile(txt, { op: 'insert', afterLine: 1, text: 'x' })).toThrowError(/只允许/);
