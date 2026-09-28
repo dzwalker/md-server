@@ -41,5 +41,7 @@
 - [x] 临时 dev 实例（`:3099`，fixture `/tmp/md-notes-fixture/t/{a.md,b.md}` + 独立 `MD_INDEX_DB`）。
 - [x] Playwright + 本机 Chromium **DOM 断言 23/23 通过**（不截图）：普通块菜单仅「插入笔记」、插到该块之后的一行、磁盘逐字未变、卡片行内 md、笔记菜单为「编辑/删除」、编辑器初值是原始 markdown、改写不新增行、取消/Esc 不落盘、Enter 保存、删除二次确认（取消不删 / 确认后那一行消失）、普通引用块不误判、外部改动后 409 且不覆盖、无前端 JS 报错。
 - [x] 验证脚本 `/tmp/notes-e2e/run.mjs`（一次性冒烟脚本，未入库以免引入前端测试框架依赖）。
-- [ ] 用户确认后上线：`docker compose up -d --build`（需审批）。
-- [ ] 用户浏览器确认视觉与手感。
+- [x] 上线（2026-09-28）：`docker compose up -d --build` 重建容器，镜像 `sha256:4bff6cfc37eb…`；容器内 `healthz` = ok / 7 空间 / 2545 文件，日志 `index ready (incremental)` + MCP :3002 / HTTP :3001 正常监听。
+- [x] 线上验证：`POST /api/notes` 已生效（缺 path / 不存在路径 → 400，未触碰任何文件）；`/api/render` 已带 `data-line-start/end`；前端 bundle `assets/index-DgkiBTy4.js` 含「插入笔记」与 `api/notes`。
+- [x] 提交并推送：`54ae46a` → `origin/main`（连同此前未提交的 CJK 强调 + 资源管理器右键菜单 + KaTeX 字体资源）。
+- [ ] 用户浏览器确认视觉与手感（https://md.zwalker.me，需刷新拿新 bundle）。

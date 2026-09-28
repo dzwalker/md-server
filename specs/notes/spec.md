@@ -39,4 +39,5 @@
 - [x] `mtimeMs` 乐观锁：文件被外部改动后写入返回 409，前端在编辑器内显示提示，磁盘不被覆盖。
 - [x] 门禁：`npx tsc --noEmit`、`npm test`（54 用例全绿）、`cd web && npm run build` 全过。
 - [x] 浏览器 DOM 断言 23/23 通过（临时 `:3099` 实例 + 本机 Chromium，见 `tasks.md`）。
-- [ ] 用户浏览器确认视觉/手感（`docker compose up -d --build` 上线后）。
+- [x] 上线：`docker compose up -d --build` 重建容器并验证（2026-09-28，见 `tasks.md`）。
+- [ ] 用户浏览器确认视觉/手感（https://md.zwalker.me，需刷新拿新 bundle）。
