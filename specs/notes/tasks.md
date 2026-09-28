@@ -55,3 +55,5 @@
 - [x] 编辑器样式重做：`.md-note-field`（聚焦光环）+ 无滚动条 textarea + `.md-note-status`（快捷键提示/错误同槽位）+ 轻量按钮；颜色走 md 主题变量。
 - [x] 验证（625 行长文档，`:3098` 实例）：插入/编辑/删除保存后视口首块漂移 ≤1px（`top 1→2` / `-20→-20` / `21→21`）；外部改动刷新 1px；编辑器 `scrollHeight <= clientHeight` 无滚动条、聚焦有环、明暗主题截图核对。
 - [x] 回归：完整笔记用例 23/23 通过（选择器随新 DOM 更新为 `.md-note-status-error`）；`npx tsc --noEmit` + `npm test` 54 用例 + `web npm run build` 全过。
+- [x] 上线（2026-09-28 第二轮）：`docker compose up -d --build`，镜像 `sha256:989319c85029…`；容器内 `healthz` = ok / 7 空间 / 2545 文件，日志 `index ready (incremental)` 无报错。
+- [x] 线上核对：新 bundle `assets/index-B7sN84KA.js` + `assets/index-C56cvXio.css`（**与本地 Playwright 验证过的产物哈希完全一致**）；bundle 内含「插入笔记」、滚动锚点选择器 `:scope > [data-line-start]`、`.md-note-status`；CSS 含 `.md-note-field` / `focus-within` / `overflow: hidden`；`POST /api/notes` 校验生效（400）；`/api/render` 带行号锚点。
