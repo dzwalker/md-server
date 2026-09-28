@@ -1,6 +1,8 @@
 // 浏览器端文件下载：把内存里的内容存成本地文件。
 // mermaid 图导出（SVG/PNG/JPG）与「下载 md 原文件」都走这里。
 
+import { api } from './api';
+
 /**
  * 文件名清洗：去掉路径分隔符与 Windows 非法字符，避免浏览器把名字截断或存不下来。
  * 不做大小写/空格等美化，尽量保留原文件名。
@@ -23,4 +25,14 @@ export function downloadBlob(blob: Blob, filename: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
+ * 下载某篇文档的**磁盘 md 原文**（走 /api/files/*，不是渲染结果）。
+ * 文档详情页的下载按钮与资源管理器右键「下载」共用，失败时抛出，由调用方提示。
+ */
+export async function downloadDocByPath(path: string): Promise<void> {
+  const fallback = path.split('/').pop() || 'document.md';
+  const f = await api.rawFile(path);
+  downloadBlob(new Blob([f.content], { type: 'text/markdown;charset=utf-8' }), f.name || fallback);
 }

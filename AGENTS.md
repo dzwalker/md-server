@@ -31,8 +31,9 @@
 | `src/config.ts` | roots 多空间加载/热更、端口、排除目录 |
 | `src/scanner.ts` | 扫描 md 文件 → `MdFile` 列表 + 目录树（只读 fs） |
 | `src/index-db.ts` | SQLite 索引与检索：全文/拼音/标签/双链/图谱/收藏/待办 |
-| `src/render.ts` | markdown → HTML 渲染（markdown-it 插件 + KaTeX 数学） |
+| `src/render.ts` | markdown → HTML 渲染（markdown-it 插件 + KaTeX 数学 + 笔记卡片/行号锚点） |
 | `src/embed.ts` | 语义向量（HF transformers + sqlite） |
+| `src/notes.ts` | 正文笔记（`> note: 内容` 一行）的业务：笔记行识别、增/改/删、单文件原子落盘 + mtime 乐观锁（唯一会写 md 的模块） |
 | `src/mcp.ts` | MCP 工具服务（SSE） |
 | `src/index.ts` | HTTP 路由 + 文件 watcher 实时索引 + 启动装配 |
 
@@ -43,7 +44,7 @@
 1. 改完必须跑 `npx tsc --noEmit`；`npm test` 全绿才能交付。
 2. 引入 lint/格式工具后，不通过者不得提交。
 3. API 或 MCP 工具签名变更，必须同步 `AGENTS.md` / `README.md` 与相关 spec。
-4. 生产数据文件（`/data` 下 md 文件、`roots.json` 之外的多空间内容）只读，不擅自增删改。
+4. 生产数据文件（`/data` 下 md 文件、`roots.json` 之外的多空间内容）只读，不擅自增删改。**唯一例外**：正文笔记接口（`POST /api/notes` → `src/notes.ts`）可以写 md，但能力被硬约束在「笔记行」（`> note: 内容`）的插入/改写/删除——不提供通用覆盖写，绝不改其它行，且必须带 `mtimeMs` 乐观锁；扩展这个例外需要先征求确认（见 `specs/notes/`）。
 5. 危险操作（见下）必须先停下来征求确认。
 
 ## 完成定义（DoD）

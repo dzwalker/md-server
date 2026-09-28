@@ -1,6 +1,8 @@
 import MarkdownIt from 'markdown-it';
+import cjkFriendly from 'markdown-it-cjk-friendly';
 import hljs from 'highlight.js';
 import path from 'node:path';
+import { NOTE_LINE_RE } from './notes.js';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const anchorModule = require('markdown-it-anchor');
@@ -42,8 +44,75 @@ md.use(anchor, {
 md.use(emoji);
 md.use(taskLists, { enabled: true });
 md.use(footnote);
+// CJK-friendly 强调（opt-in 的 CommonMark 修订草案，见 specs/cjk-friendly-emphasis/spec.md）：
+// 不加这一条时 `**"中文"**中文`、`汉字**（括号）**汉字` 这类写法会退化成字面 `**`
+// （CommonMark 的 left/right-flanking 规则假设词与标点间有空格，见 commonmark-spec#650）。
+// 该插件只在中/日/韩字符与 CJK 标点相邻时生效，CommonMark 官方 652 例输出不变。
+md.use(cjkFriendly);
 md.use(katexPlugin);
 md.use(wikilinkPlugin);
+md.use(notePlugin);
+md.use(srcLinePlugin);
+
+/**
+ * 笔记行（`> note: 内容`）→ 笔记卡片（见 specs/notes/spec.md）。
+ *
+ * 必须排在 blockquote 之前，否则这一行会先被当成普通引用块吃掉。
+ * 卡片上带三个 data 属性，供前端就地编辑（详见 specs/notes/plan.md）：
+ *   - data-note-line：笔记所在行号（1-based）
+ *   - data-note-raw ：笔记正文的**原始 markdown**（编辑器初值，不能从渲染结果反推）
+ *   - data-line-start / data-line-end：与普通块统一的行号锚点
+ */
+function notePlugin(md: MarkdownIt) {
+  md.block.ruler.before('blockquote', 'md_note', (state: any, startLine: number, endLine: number, silent: boolean) => {
+    const from = state.bMarks[startLine];
+    const to = state.eMarks[startLine];
+    const rawLine = state.src.slice(from, to);
+    const m = NOTE_LINE_RE.exec(rawLine);
+    if (!m) return false;
+    if (silent) return true;
+    const token = state.push('md_note', 'div', 0);
+    token.block = true;
+    token.content = m[1];
+    token.map = [startLine, startLine + 1];
+    token.attrSet('data-note-line', String(startLine + 1));
+    token.attrSet('data-note-raw', m[1]);
+    token.attrSet('data-line-start', String(startLine + 1));
+    token.attrSet('data-line-end', String(startLine + 1));
+    state.line = startLine + 1;
+    return true;
+  });
+
+  md.renderer.rules.md_note = (tokens: any[], idx: number, _options: any, env: any) => {
+    const t = tokens[idx];
+    const raw = String(t.attrGet('data-note-raw') ?? '');
+    return (
+      `<div class="md-note" data-note-line="${md.utils.escapeHtml(t.attrGet('data-note-line') || '')}"` +
+      ` data-note-raw="${md.utils.escapeHtml(raw)}"` +
+      ` data-line-start="${md.utils.escapeHtml(t.attrGet('data-line-start') || '')}"` +
+      ` data-line-end="${md.utils.escapeHtml(t.attrGet('data-line-end') || '')}">` +
+      `<div class="md-note-label">笔记</div>` +
+      `<div class="md-note-body">${md.renderInline(raw, env)}</div>` +
+      `</div>\n`
+    );
+  };
+}
+
+/**
+ * 给每个顶层块打上源文件行号锚点：前端右键「插入笔记」时据此知道
+ * 「插在这个块之后的一行」，不靠文本模糊匹配（详见 specs/notes/plan.md）。
+ * data-line-start = 块首行（1-based），data-line-end = 块末行的行号（含）。
+ */
+function srcLinePlugin(md: MarkdownIt) {
+  md.core.ruler.push('src_line_attrs', (state: any) => {
+    for (const token of state.tokens) {
+      if (!token.map || token.level !== 0 || token.nesting < 0) continue;
+      if (token.type === 'inline' || token.type === 'md_note') continue;
+      token.attrSet('data-line-start', String(token.map[0] + 1));
+      token.attrSet('data-line-end', String(token.map[1]));
+    }
+  });
+}
 
 // 把 [[目标]] / [[目标|别名]] / [[目标#锚点]] 渲染成可点击链接。
 // 目标解析（basename → 真实 urlPath）在前端点击时进行（store.fileIndex）。
@@ -189,8 +258,14 @@ function katexPlugin(md: MarkdownIt) {
 
 (md as any).renderer.rules.math_inline = (tokens: any[], idx: number) =>
   `<span class="katex-math">${md.utils.escapeHtml(tokens[idx].content)}</span>`;
-(md as any).renderer.rules.math_block = (tokens: any[], idx: number) =>
-  `<span class="katex-block">${md.utils.escapeHtml(tokens[idx].content)}</span>\n`;
+(md as any).renderer.rules.math_block = (tokens: any[], idx: number) => {
+  const t = tokens[idx];
+  // 数学块是自定义 token：这里手动带上行号锚点，右键才能定位到它。
+  const start = t.attrGet('data-line-start');
+  const end = t.attrGet('data-line-end');
+  const anchor = start && end ? ` data-line-start="${start}" data-line-end="${end}"` : '';
+  return `<span class="katex-block"${anchor}>${md.utils.escapeHtml(t.content)}</span>\n`;
+};
 
 const defaultImageRenderer = (md as any).renderer.rules.image ||
   ((tokens: any[], idx: number, options: any, _env: any, self: any) => self.renderToken(tokens, idx, options));

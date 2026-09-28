@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import {
   DndContext,
   closestCenter,
@@ -16,12 +16,33 @@ import { CSS } from '@dnd-kit/utilities';
 import { X, Star, ListTree, Layers, PanelLeftOpen, Download } from 'lucide-react';
 import { useStore, type OpenDoc } from '@/state/store';
 import { api } from '@/lib/api';
-import { downloadBlob } from '@/lib/download';
-import type { Backlink, RenderResult } from '@/lib/types';
+import { downloadDocByPath } from '@/lib/download';
+import type { Backlink, NoteRequest, RenderResult } from '@/lib/types';
 import { cn, stripMdExt } from '@/lib/utils';
 import { renderExtras, highlightContent } from '@/lib/markdown-extras';
 import { findAnchor, resolveMarkdownLink, resolveWikilink } from '@/lib/doc-links';
+import {
+  closeActiveNoteEditor,
+  resolveNoteContext,
+  startInsertEditor,
+  startNoteEditor,
+  type NoteContextTarget,
+} from '@/lib/notes';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { useElementSize } from '@/hooks/use-element-size';
 import { GraphView } from './graph-view';
 import { TocPanel } from './toc-panel';
@@ -109,11 +130,19 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
 
   const contentRef = useRef<HTMLDivElement>(null);
   const tabsBarRef = useRef<HTMLDivElement>(null);
+  // 上一次生效的 mermaid 主题：用于区分「首次挂载」和「用户真的换了主题」。
+  const prevMermaidThemeRef = useRef(mermaidTheme);
   const { ref: contentAreaRef, width: contentWidth } = useElementSize<HTMLDivElement>();
   const [backlinks, setBacklinks] = useState<Backlink[]>([]);
   const [outlinks, setOutlinks] = useState<string[]>([]);
   const [tocOpen, setTocOpen] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  // 正文右键菜单（插入笔记 / 编辑 / 删除，见 specs/notes/）
+  const [noteMenu, setNoteMenu] = useState<NoteContextTarget | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<number | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimerRef = useRef<number | null>(null);
 
   // 工具型「文档」（如图谱）用保留路径 /__tools__/... 打开为 tab
   const isTool = !!activeDoc && activeDoc.startsWith('/__tools__/');
@@ -272,9 +301,14 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   }, [activeRender, activeQuery]);
 
   // mermaid 主题切换后，把正文重置回服务端占位符并整体重渲染，让图表立即换肤。
+  // 注意：只在主题真的变了时才执行——挂载时的正文渲染已由上面那个 effect 负责，
+  // 这里再渲染一遍会让同一份正文被处理两次（数学公式、图表都会重复）。
   useEffect(() => {
+    if (prevMermaidThemeRef.current === mermaidTheme) return;
+    prevMermaidThemeRef.current = mermaidTheme;
     const el = contentRef.current;
     if (!el || !activeRender) return;
+    closeActiveNoteEditor();
     el.innerHTML = activeRender.html;
     void renderExtras(el);
     highlightContent(el, activeQuery);
@@ -300,15 +334,102 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   // 下载当前文档的原始 md 文件（走 /api/files/*，拿到的是磁盘原文而不是渲染结果）。
   async function onDownload() {
     if (!activeDoc || isTool || downloading) return;
-    const fallback = activeDoc.split('/').pop() || 'document.md';
     setDownloading(true);
     try {
-      const f = await api.rawFile(activeDoc);
-      downloadBlob(new Blob([f.content], { type: 'text/markdown;charset=utf-8' }), f.name || fallback);
+      await downloadDocByPath(activeDoc);
     } catch (err) {
       console.warn('下载失败：', err);
     } finally {
       setDownloading(false);
+    }
+  }
+
+  // ===== 笔记（`> note: 内容` 一行；见 specs/notes/）=====
+
+  function showNotice(msg: string) {
+    setNotice(msg);
+    if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = window.setTimeout(() => {
+      noticeTimerRef.current = null;
+      setNotice(null);
+    }, 3000);
+  }
+
+  // 重新拉一次当前正文：保存笔记后正文要立刻反映磁盘上的新内容（编辑器随之消失）。
+  const refreshActiveRender = useCallback(async () => {
+    if (!activeDoc) return;
+    const r = await api.render(activeDoc);
+    cacheRender(activeDoc, r);
+  }, [activeDoc, cacheRender]);
+
+  // 写笔记：带上渲染时看到的 mtimeMs 做乐观锁（服务端不一致会返回 409，绝不覆盖别处改动）。
+  const submitNote = useCallback(
+    async (payload: Omit<NoteRequest, 'path' | 'mtimeMs'>) => {
+      if (!activeDoc) throw new Error('没有打开的文档');
+      await api.saveNote({ path: activeDoc, mtimeMs: activeRender?.mtimeMs, ...payload });
+      await refreshActiveRender();
+    },
+    [activeDoc, activeRender, refreshActiveRender],
+  );
+
+  // 正文右键：已存在的笔记 → 「编辑 / 删除」；其它位置 → 只有「插入笔记」。
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el || !activeDoc || isTool) return;
+    const onContextMenu = (e: globalThis.MouseEvent) => {
+      // 编辑器自己的右键留给系统菜单（方便复制/粘贴草稿）
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.('.md-note-editor')) return;
+      e.preventDefault();
+      closeActiveNoteEditor();
+      setNoteMenu(resolveNoteContext(el, e));
+    };
+    el.addEventListener('contextmenu', onContextMenu);
+    return () => el.removeEventListener('contextmenu', onContextMenu);
+  }, [activeDoc, activeRender, isTool]);
+
+  // 切文档 / 卸载时收掉就地编辑器与菜单，避免残留状态。
+  useEffect(() => {
+    return () => {
+      closeActiveNoteEditor();
+      if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
+    };
+  }, [activeDoc]);
+
+  function onInsertNote() {
+    const t = noteMenu;
+    setNoteMenu(null);
+    if (!t || t.kind !== 'insert') return;
+    const el = contentRef.current;
+    if (!el) return;
+    startInsertEditor(el, t.anchor, (text) => submitNote({ op: 'insert', afterLine: t.afterLine, text }));
+  }
+
+  function onEditNote() {
+    const t = noteMenu;
+    setNoteMenu(null);
+    if (!t || t.kind !== 'note') return;
+    startNoteEditor(t.el, t.raw, (text) => submitNote({ op: 'update', line: t.line, text }));
+  }
+
+  function onDeleteNote() {
+    const t = noteMenu;
+    setNoteMenu(null);
+    if (!t || t.kind !== 'note') return;
+    setPendingDelete(t.line);
+  }
+
+  async function onConfirmDelete() {
+    if (pendingDelete === null || deleteBusy) return;
+    setDeleteBusy(true);
+    try {
+      await submitNote({ op: 'delete', line: pendingDelete });
+      setPendingDelete(null);
+    } catch (e) {
+      setPendingDelete(null);
+      showNotice(e instanceof Error ? e.message : '删除失败');
+    } finally {
+      setDeleteBusy(false);
     }
   }
 
@@ -486,6 +607,62 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
           </div>
         )}
       </div>
+
+      {/* 正文右键菜单：正文里没有 React 组件树（HTML 是服务端注入的），
+          所以用一个 1px 的定位触发器把 Radix 菜单锚在鼠标位置。 */}
+      {noteMenu && (
+        <DropdownMenu modal={false} open onOpenChange={(o) => { if (!o) setNoteMenu(null); }}>
+          <DropdownMenuTrigger asChild>
+            <span
+              aria-hidden
+              className="pointer-events-none fixed h-px w-px"
+              style={{ left: noteMenu.x, top: noteMenu.y }}
+            />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            side="bottom"
+            sideOffset={2}
+            className="w-auto min-w-32"
+            onCloseAutoFocus={(e) => e.preventDefault()}
+          >
+            {noteMenu.kind === 'insert' ? (
+              <DropdownMenuItem onSelect={onInsertNote}>插入笔记</DropdownMenuItem>
+            ) : (
+              <>
+                <DropdownMenuItem onSelect={onEditNote}>编辑</DropdownMenuItem>
+                <DropdownMenuItem onSelect={onDeleteNote}>删除</DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+
+      {/* 删除二次确认 */}
+      <Dialog open={pendingDelete !== null} onOpenChange={(o) => { if (!o && !deleteBusy) setPendingDelete(null); }}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>删除这条笔记？</DialogTitle>
+            <DialogDescription>
+              只会删掉文件里那一行 <code>&gt; note:</code>，其它内容不受影响。删除后无法撤销。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingDelete(null)} disabled={deleteBusy}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={onConfirmDelete} disabled={deleteBusy}>
+              {deleteBusy ? '删除中…' : '删除'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {notice && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-md bg-popover px-3 py-1.5 text-sm text-popover-foreground shadow-md ring-1 ring-foreground/10">
+          {notice}
+        </div>
+      )}
     </div>
   );
 }

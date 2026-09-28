@@ -1,11 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Tree, type NodeApi, type NodeRendererProps, type TreeApi } from 'react-arborist';
-import { ChevronRight, FileText, Folder, FolderOpen, Network } from 'lucide-react';
+import { ChevronRight, ClipboardCopy, Copy, Download, FileText, Folder, FolderOpen, Network } from 'lucide-react';
 import type { TreeNode } from '@/lib/types';
 import { useStore } from '@/state/store';
 import { useElementSize } from '@/hooks/use-element-size';
 import { cn, stripMdExt } from '@/lib/utils';
+import { copyText } from '@/lib/clipboard';
+import { downloadDocByPath } from '@/lib/download';
 import { Button } from '@/components/ui/button';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 
 // 资源管理器里内置的「工具」虚拟文件夹（不是磁盘上的真实目录），后续工具继续往里加。
 const TOOLS_NODE: TreeNode = {
@@ -17,17 +25,46 @@ const TOOLS_NODE: TreeNode = {
   ],
 };
 
+// 资源管理器里的轻提示（「已复制」/「下载失败」）。菜单选中后 Radix 会立刻关闭菜单，
+// 所以提示不能挂在菜单里，这里用 context 下发给每个节点行，由 TreeView 顶层渲染。
+const ToastContext = createContext<(msg: string) => void>(() => {});
+
 function TreeNodeRow({ node, style }: NodeRendererProps<TreeNode>) {
   const { openDoc, showFilename, activeDoc } = useStore();
+  const toast = useContext(ToastContext);
   const d = node.data;
   const isDir = d.type === 'dir';
   const isTool = d.type === 'tool';
+  const isFile = d.type === 'file';
+  // 「工具」是内置的虚拟目录（不是磁盘上的真实路径），不给右键菜单，免得复制出不存在的路径。
+  const isVirtual = d.path.startsWith('/__tools__');
   const isActive = !isDir && d.path === activeDoc;
   const Icon = isDir ? (node.isOpen ? FolderOpen : Folder) : isTool ? Network : FileText;
   const label = isDir ? d.name : isTool ? (d.title || d.name) : showFilename ? stripMdExt(d.name) : (d.title || d.name);
 
-  return (
-    <div style={style} className={cn('flex items-center gap-1 pr-2 text-sm', isActive && 'bg-accent')}>
+  // 「复制文件名」给的是磁盘上的真实文件名（带 .md 扩展名），不是树上显示的文档标题。
+  async function onCopyName() {
+    const ok = await copyText(d.name);
+    toast(ok ? `已复制文件名：${d.name}` : '复制失败，请手动复制');
+  }
+
+  // 「复制完整路径」给的是应用内的 urlPath（与树、URL、收藏/搜索里的 path 完全一致）。
+  async function onCopyPath() {
+    const ok = await copyText(d.path);
+    toast(ok ? `已复制路径：${d.path}` : '复制失败，请手动复制');
+  }
+
+  async function onDownload() {
+    try {
+      await downloadDocByPath(d.path);
+    } catch (err) {
+      console.warn('下载失败：', err);
+      toast('下载失败');
+    }
+  }
+
+  const row = (
+    <div className="flex h-full w-full items-center gap-1 pr-2">
       <button
         type="button"
         tabIndex={-1}
@@ -51,6 +88,36 @@ function TreeNodeRow({ node, style }: NodeRendererProps<TreeNode>) {
       >
         {label}
       </button>
+    </div>
+  );
+
+  return (
+    <div style={style} className={cn('text-sm', isActive && 'bg-accent')}>
+      {isVirtual ? (
+        row
+      ) : (
+        <ContextMenu>
+          <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+          <ContextMenuContent className="min-w-44">
+            {isFile && (
+              <ContextMenuItem onSelect={onCopyName}>
+                <Copy />
+                复制文件名
+              </ContextMenuItem>
+            )}
+            <ContextMenuItem onSelect={onCopyPath}>
+              <ClipboardCopy />
+              复制完整路径
+            </ContextMenuItem>
+            {isFile && (
+              <ContextMenuItem onSelect={onDownload}>
+                <Download />
+                下载
+              </ContextMenuItem>
+            )}
+          </ContextMenuContent>
+        </ContextMenu>
+      )}
     </div>
   );
 }
@@ -83,6 +150,21 @@ export function TreeView() {
   useEffect(() => {
     if (measuredHeight > 0) setHeight(measuredHeight);
   }, [measuredHeight]);
+
+  // 右键菜单操作后的轻提示：1.8s 自动消失，新的提示会顶掉旧的。
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const toastTimer = useRef<number | undefined>(undefined);
+  const showToast = useCallback((msg: string) => {
+    setToastMsg(msg);
+    if (toastTimer.current !== undefined) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToastMsg(null), 1800);
+  }, []);
+  useEffect(
+    () => () => {
+      if (toastTimer.current !== undefined) window.clearTimeout(toastTimer.current);
+    },
+    [],
+  );
 
   // 按当前 set 的目录过滤并排序顶层节点（set 里目录的顺序即树中顺序），
   // 再按设置决定是否隐藏「无文档」的空文件夹。
@@ -178,24 +260,31 @@ export function TreeView() {
       </div>
       <div ref={ref} className="min-h-0 flex-1 overflow-x-hidden">
         {height > 0 && (
-          <Tree
-            ref={treeRef}
-            data={visible}
-            idAccessor="path"
-            childrenAccessor="children"
-            initialOpenState={initialOpenState}
-            width="100%"
-            height={height}
-            rowHeight={28}
-            indent={12}
-            disableDrag
-            disableDrop
-            className="text-foreground"
-          >
-            {TreeNodeRow}
-          </Tree>
+          <ToastContext.Provider value={showToast}>
+            <Tree
+              ref={treeRef}
+              data={visible}
+              idAccessor="path"
+              childrenAccessor="children"
+              initialOpenState={initialOpenState}
+              width="100%"
+              height={height}
+              rowHeight={28}
+              indent={12}
+              disableDrag
+              disableDrop
+              className="text-foreground"
+            >
+              {TreeNodeRow}
+            </Tree>
+          </ToastContext.Provider>
         )}
       </div>
+      {toastMsg && (
+        <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 max-w-[80vw] -translate-x-1/2 truncate rounded-md bg-popover px-3 py-1.5 text-xs text-popover-foreground shadow-md ring-1 ring-foreground/10">
+          {toastMsg}
+        </div>
+      )}
     </div>
   );
 }

@@ -103,16 +103,17 @@ export async function renderExtras(container: HTMLElement) {
   // 数学：只有正文里真的出现公式才加载 katex。
   if (container.querySelector('.katex-math, .katex-block')) {
     const k = await ensureKatex();
-    container.querySelectorAll('.katex-math').forEach((el) => {
+    // renderExtras 可能对同一个容器被调用多次（首屏 idle 渲染、搜索词变化、mermaid 换肤重置）。
+    // 已渲染的节点必须跳过：KaTeX 的输出里同时含 MathML、<annotation> 里的 TeX 原文和 HTML 三份
+    // 文本，若把 textContent 再当 TeX 渲染一遍，页面上就会出现重复的字母/公式（x → xxx）。
+    // 原始 TeX 存在 data-md-tex 上，任何重渲染都用它，而不是上一轮的渲染结果。
+    container.querySelectorAll<HTMLElement>('.katex-math, .katex-block').forEach((el) => {
+      if (el.dataset.mdRendered === '1') return;
+      const tex = el.dataset.mdTex ?? el.textContent ?? '';
+      el.dataset.mdTex = tex;
       try {
-        k?.render(el.textContent || '', el as HTMLElement, { throwOnError: false });
-      } catch {
-        /* ignore */
-      }
-    });
-    container.querySelectorAll('.katex-block').forEach((el) => {
-      try {
-        k?.render(el.textContent || '', el as HTMLElement, { displayMode: true, throwOnError: false });
+        k?.render(tex, el, { displayMode: el.classList.contains('katex-block'), throwOnError: false });
+        el.dataset.mdRendered = '1';
       } catch {
         /* ignore */
       }

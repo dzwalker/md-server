@@ -8,6 +8,7 @@ import { scanAll, buildTree, scanDirs, scanRoot, toMdFile, resolveUrlPath, fsPat
 import type { MdFile } from './scanner.js';
 import type { Root } from './config.js';
 import { renderMarkdown } from './render.js';
+import { applyNoteToFile, NoteError, toNoteOpInput, type NoteOpInput } from './notes.js';
 import { rebuildIndex, syncIndex, removeIndexPrefixInBatches, searchFiles, listTags, indexStats, backlinks, outlinks, graph, listFavorites, setFavorite, removeFavorite, listTodos, listDueTasks, indexFiles, indexFilesInBatches, removeIndexPaths, removeIndexPrefix, listFileSummaries, listFilesMeta, getFileMeta, listRecentFiles, truncateWal } from './index-db.js';
 import { startMcp } from './mcp.js';
 import { buildEmbeddings, embedFiles, deleteEmbeddings, deleteEmbeddingsByPrefix, semanticSearch, embeddingsStatus } from './embed.js';
@@ -80,6 +81,29 @@ app.get('/api/render/*', async (req, reply) => {
   if (!f || !f.fsPath) return reply.code(404).send({ error: 'not found', path: p });
   const { html, headings } = renderMarkdown(fs.readFileSync(f.fsPath, 'utf8'), f.dir);
   return { ...f, html, headings };
+});
+
+// 笔记（`> note: 内容`）的插入 / 改写 / 删除。这是服务里**唯一**会写 md 文件的接口：
+// 业务全部在 notes.ts（只改目标笔记行，其余逐字保持），这里只做参数解析与错误码映射。
+// 详见 specs/notes/spec.md。
+app.post('/api/notes', async (req, reply) => {
+  const body = (req.body || {}) as NoteOpInput;
+  const p = String(body?.path || '');
+  const fsPath = p ? resolveUrlPath(p) : null;
+  if (!fsPath) return reply.code(400).send({ error: '非法或缺失的文档路径 path' });
+  try {
+    // 线路字段是 mtimeMs（前端渲染时看到的磁盘 mtime），业务侧叫 expectMtimeMs（乐观锁）。
+    const r = applyNoteToFile(fsPath, toNoteOpInput(body));
+    // 立刻把这篇文档重新入索引：/api/render 与 /api/stat 马上反映新的 mtime，
+    // 否则用户紧接着改第二条笔记会被乐观锁误判成「文件已被外部修改」。
+    const f = toMdFile(fsPath);
+    if (f) indexFiles([f]);
+    bumpVersion();
+    return { ok: true, path: p, line: r.line, mtimeMs: r.mtimeMs, size: r.size };
+  } catch (e) {
+    if (e instanceof NoteError) return reply.code(e.status).send({ error: e.message });
+    throw e;
+  }
 });
 
 app.get('/api/search', async (req) => {

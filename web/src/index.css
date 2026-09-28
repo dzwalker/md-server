@@ -186,6 +186,68 @@
 .md-content mark { background: #ffe58f; color: #000; padding: 0 1px; border-radius: 2px; }
 .md-content a { color: var(--md-accent, #0969da); text-decoration: var(--md-link-underline, none); }
 
+/* ==== 笔记（`> note: 内容` 一行，服务端渲染成卡片；见 specs/notes/）==== */
+.md-content .md-note {
+  margin: 0.7em 0;
+  padding: 7px 12px 8px;
+  border-left: 3px solid var(--md-note-border, var(--md-accent, #d97706));
+  border-radius: 0 6px 6px 0;
+  background: var(--md-note-bg, var(--md-quote, var(--muted)));
+  color: var(--md-fg, var(--foreground));
+  font-size: 0.95em;
+}
+.md-content .md-note-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--md-note-border, var(--md-accent, #d97706));
+  user-select: none;
+}
+.md-content .md-note-body { margin-top: 1px; }
+.md-content .md-note-body > :first-child { margin-top: 0; }
+.md-content .md-note-body > :last-child { margin-bottom: 0; }
+
+/* 就地编辑器（保存 / 取消） */
+.md-content .md-note-editor { margin-top: 6px; }
+.md-note-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 30px;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 0.95em;
+  line-height: 1.5;
+  color: var(--md-fg, var(--foreground));
+  background: var(--md-bg, var(--background, #fff));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  resize: vertical;
+}
+.md-note-input:focus { border-color: var(--md-note-border, var(--md-accent, #d97706)); }
+.md-note-actions { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+.md-note-error { flex: 1; min-width: 0; font-size: 12px; color: var(--destructive, #dc2626); }
+.md-note-btn {
+  flex: none;
+  padding: 3px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--foreground);
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.md-note-btn:hover { background: var(--accent); }
+.md-note-btn:disabled { opacity: 0.6; cursor: default; }
+.md-note-btn-primary {
+  color: #fff;
+  background: var(--md-note-border, var(--md-accent, #d97706));
+  border-color: transparent;
+}
+.md-note-btn-primary:hover { background: var(--md-note-border, var(--md-accent, #d97706)); filter: brightness(1.08); }
+
 /* ==== mermaid 图表 + 全屏查看 ==== */
 .mermaid-wrap { position: relative; }
 .md-content .mermaid {

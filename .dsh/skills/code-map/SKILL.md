@@ -15,7 +15,8 @@ whenToUse: 需要理解或修改 md-server 结构时（web/ 前端 React 工程�
 | `config.ts` | roots 多空间加载/热更、端口、排除目录 | `ROOTS`, `PORT`, `reloadRoots` |
 | `scanner.ts` | 扫描 md → `MdFile` 列表 + 目录树（只读 fs） | `scanAll`, `buildTree`, `MdFile` |
 | `index-db.ts` | SQLite 索引：全文/拼音检索、标签、双链/反链/图谱、收藏、待办/到期、最近更新 | `rebuildIndex`, `searchFiles`, `listTags`, `backlinks`, `outlinks`, `graph`, `listFavorites`, `setFavorite`, `removeFavorite`, `listTodos`, `listDueTasks`, `listFileSummaries`, `listFilesMeta`, `getFileMeta`, `listRecentFiles` |
-| `render.ts` | markdown-it 渲染（KaTeX / emoji / task / footnote / highlight） | `renderMarkdown` |
+| `render.ts` | markdown-it 渲染（KaTeX / emoji / task / footnote / highlight + 笔记卡片 + 块级行号锚点） | `renderMarkdown` |
+| `notes.ts` | 正文笔记（`> note: 内容` 一行）：识别 / 增改删 / 原子落盘 / mtime 乐观锁（唯一写 md 的模块，见 `specs/notes/`） | `applyNoteToFile`, `applyNoteOp`, `toNoteOpInput`, `isNoteLine`, `NoteError` |
 | `embed.ts` | 语义向量（HF transformers + sqlite） | `buildEmbeddings`, `embedFiles`, `deleteEmbeddings`, `semanticSearch`, `embeddingsStatus` |
 | `mcp.ts` | MCP 工具服务（SSE，端口 3002） | `startMcp` |
 | `index.ts` | 装配：HTTP 路由 + 文件 watcher 实时索引 + 启动 | 入口 |
@@ -30,12 +31,14 @@ whenToUse: 需要理解或修改 md-server 结构时（web/ 前端 React 工程�
 | 状态 | `src/state/store.tsx` | 全局 store：打开的 tab（localStorage 持久化）、树、收藏、空间 set、主题/TOC 宽度等偏好 |
 | 弹层 | `src/components/command-palette.tsx` | ⌘P：空态「最近更新」（`/api/recent`，当前空间最近 20 篇），输入后走 `/api/search` |
 | 弹层 | `src/components/opened-switcher.tsx` | ⌘O：已打开文档看板，一列 = 一个一级目录，`←→↑↓` 导航 + Enter 打开 |
-| 主区 | `src/components/doc-view.tsx` | 文档头 + tab 栏（dnd-kit 拖拽）+ 正文渲染 + TOC |
-| 侧栏 | `src/components/sidebar*.tsx` | 资源管理器（react-arborist）/ 已打开 / 标签 / 收藏 / 空间 / 设置 |
+| 侧栏 | `src/components/sidebar*.tsx` | 资源管理器（react-arborist，文件树右键菜单：复制文件名/复制完整路径/下载，见 `specs/explorer-context-menu/`）/ 已打开 / 标签 / 收藏 / 空间 / 设置 |
+| 主区 | `src/components/doc-view.tsx` | 文档头 + tab 栏（dnd-kit 拖拽）+ 正文渲染 + TOC + 正文右键笔记菜单 / 就地编辑 / 删除确认 |
 | 库 | `src/lib/api.ts`, `lib/types.ts` | HTTP API 封装与响应类型（新增接口同步这两处） |
+| 库 | `src/lib/download.ts`, `lib/clipboard.ts` | 下载 md 原文（`downloadDocByPath`，文档头与右键菜单共用）/ 复制到剪贴板（含非安全上下文降级） |
 | 库 | `src/lib/markdown-extras.ts`, `mermaid-*.ts`, `md-themes.ts` | 客户端二次渲染 katex/mermaid、导出、Markdown 主题 |
+| 库 | `src/lib/notes.ts` | 笔记右键定位（`resolveNoteContext`）+ 就地编辑器（`startInsertEditor` / `startNoteEditor` / `closeActiveNoteEditor`，命令式 DOM） |
 
-- 依赖 API：`/api/tree` `/api/files` `/api/files/*` `/api/render/*` `/api/stat` `/api/search` `/api/search-semantic` `/api/recent` `/api/tags` `/api/backlinks/*` `/api/outlinks/*` `/api/graph` `/api/favorites` `/api/todos` `/api/sets` `/api/status` `/api/asset/*`
+- 依赖 API：`/api/tree` `/api/files` `/api/files/*` `/api/render/*` `/api/stat` `/api/notes`（POST，唯一会写 md 的接口）`/api/search` `/api/search-semantic` `/api/recent` `/api/tags` `/api/backlinks/*` `/api/outlinks/*` `/api/graph` `/api/favorites` `/api/todos` `/api/sets` `/api/status` `/api/asset/*`
 - 渲染库：按需加载 `/media/*`（katex / mermaid / highlight）
 
 ### 基础设施

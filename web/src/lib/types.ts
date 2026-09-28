@@ -66,7 +66,29 @@ export interface RenderResult {
   title: string;
   html: string;
   headings: Heading[];
+  /** 磁盘 mtime：写笔记时用作乐观锁，避免覆盖别处的改动。 */
+  mtimeMs?: number;
   [key: string]: unknown;
+}
+
+/** POST /api/notes 的请求体：笔记的插入 / 改写 / 删除（见 specs/notes/）。 */
+export interface NoteRequest {
+  path: string;
+  op: 'insert' | 'update' | 'delete';
+  /** insert：插在这一行之后（1-based） */
+  afterLine?: number;
+  /** update / delete：目标笔记行号（1-based） */
+  line?: number;
+  text?: string;
+  mtimeMs?: number;
+}
+
+export interface NoteResponse {
+  ok: boolean;
+  path: string;
+  line: number;
+  mtimeMs: number;
+  size: number;
 }
 
 /** /api/files/* 的响应：文件元信息 + 磁盘原文。 */
