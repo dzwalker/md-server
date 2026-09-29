@@ -57,7 +57,9 @@
       · 笔记功能回归 23/23；长文档跳位/编辑器样式 ✓（插入时视口首块 top 1→1、scrollTop 不再需要补偿）；外部改动保位 1px
       · 目录「笔记」联动 4/4（TOC 列表读 DOM，局部替换 + 重编号后同步正确、点击跳转正常）；图谱往返 4/4（工具文档卸载正文容器后仍会重新注入）
 - [x] 门禁：`npx tsc --noEmit`（后端 + web）、`npm test` 73 用例、`web npm run build` 全过。
-- [ ] 上线（需审批）+ 用户浏览器确认手感。
+- [x] 上线（2026-09-29）：`docker compose up -d --build`，镜像 `sha256:bba74eb43536…`；容器内 `healthz` = ok / 7 空间 / 2553 文件，`index ready (incremental, 13 changed)` 无报错。
+- [x] 线上核对：新 bundle `assets/index-Cz8oDDGx.js` + `assets/index-CQeX9EJK.css`（**与本地 Playwright 验证过的产物哈希完全一致**）；bundle 内含局部替换选择器 `.md-note[data-note-line=`、编辑器壳 `.md-note-field`；`POST /api/notes` 校验生效（400）。
+- [ ] 用户浏览器确认手感（https://md.zwalker.me，需刷新拿新 bundle）。
 
 ## T8 修复轮②：写盘把文件属主改成 root（用户报障，2026-09-28）
 
