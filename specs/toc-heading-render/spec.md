@@ -56,4 +56,4 @@
 
 - 2026-09-29 实现：`src/render.ts`（`headingContent` 拆 parts + 实体解码 + 标题正则容忍换行 + anchor `getTokensText` 空文本时兜底公式源码）、`web/src/lib/types.ts`（`TocPart`/`Heading.parts`）、`web/src/components/toc-panel.tsx`（按 parts 渲染 + 复用 `renderExtras`）、`web/src/index.css`（目录内 KaTeX 字号 1em、公式内不换行）。
 - 2026-09-29 验证：`npm test` 64/64；本地隔离实例 `/api/render/demo/sample.md` 的 `headings` 结构如上；Chromium（playwright，`/tmp/md-verify/check.py`）实测目录 DOM 与点击滚动。
-- 2026-09-29 **未上线**：本机 `md-server` 容器仍是旧镜像，需 `docker compose up -d --build`（需用户批准）。
+- 2026-09-29 **已上线**：`docker compose up -d --build`（镜像 `f0f2de942c7a`，bundle `index-BBbOgxKN.js`）。线上核对：容器 healthz 正常（4 个空间 / 2553 文件 / 索引就绪）、容器内 `GET /api/notes?dirs=…` 返回真实笔记（1 篇 / 2 条）、镜像内 `web/dist/assets/index-BBbOgxKN.js` 与本地已浏览器验证的产物 sha256 逐字节一致（`a84fdbe2448247b1…`）；`https://md.zwalker.me` 仍走既有登录网关（302 → daily.zwalker.me/login.html），非本次改动引入。

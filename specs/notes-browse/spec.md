@@ -57,4 +57,4 @@
 - 2026-09-29 服务端：`src/notes.ts` 加 `extractNotes`（围栏感知）；`src/index-db.ts` 加 `listNotes`（读 files.body 现算）；`src/index.ts` 加 `GET /api/notes`。
 - 2026-09-29 前端：`lib/activities.ts` + `sidebar.tsx` 加「笔记」活动；新增 `components/sidebar/notes-panel.tsx`；`toc-panel.tsx` 加笔记开关与笔记节点；`lib/doc-links.ts` 的 `findAnchor` 支持 `note:<行号>`；`lib/notes.ts` 加 `notePreview` / `scrollToNote` / `flashNote`；`index.css` 加落点闪烁。
 - 2026-09-29 实测：隔离实例（`MD_BASE_DIR`/`MD_SETS_FILE`/`MD_INDEX_DB` 都在 `/tmp/md-verify`，`MD_PORT=3011`）+ headless Chromium 断言 B/C 全部条目（脚本 `/tmp/md-verify/check-notes*.py`）。
-- 2026-09-29 **未上线**：本机 `md-server` 容器仍是旧镜像，需 `docker compose up -d --build`（需用户批准）。
+- 2026-09-29 **已上线**：`docker compose up -d --build`（镜像 `f0f2de942c7a`，bundle `index-BBbOgxKN.js`）。线上核对：容器 healthz 正常（4 个空间 / 2553 文件 / 索引就绪）、容器内 `GET /api/notes?dirs=…` 返回真实笔记（1 篇 / 2 条）、镜像内 `web/dist/assets/index-BBbOgxKN.js` 与本地已浏览器验证的产物 sha256 逐字节一致（`a84fdbe2448247b1…`）；`https://md.zwalker.me` 仍走既有登录网关（302 → daily.zwalker.me/login.html），非本次改动引入。

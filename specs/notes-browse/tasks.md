@@ -13,4 +13,5 @@
 - [x] T11 门禁：根 `npx tsc --noEmit` + `web/ npx tsc --noEmit` + `npm test`（73/73）+ `web/ npm run build`。
 - [x] T12 浏览器实测：隔离实例 + headless Chromium 覆盖 spec 的 B/C 全部条目（目录内联笔记、开关、跨文件跳转、面板层级/搜索/收起、点文件名打开文档）。
 - [x] T13 文档：本 spec 目录 + `README.md`、`specs/README.md`。
-- [ ] T14 上线（需用户批准 `docker compose up -d --build`）；上一轮 TOC 公式/引号修复同样待上线。
+- [x] T14 上线：2026-09-29 与 TOC 修复一并 `docker compose up -d --build`（镜像 `f0f2de942c7a`、bundle `index-BBbOgxKN.js`），
+      容器内 `/api/notes` 返回真实笔记、镜像产物与本地已浏览器验证的 bundle 哈希一致。

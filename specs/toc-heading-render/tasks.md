@@ -10,4 +10,4 @@
 - [x] T8 门禁：根 `npx tsc --noEmit` + `web/ npx tsc --noEmit` + `npm test`（64/64）+ `web/ npm run build`。
 - [x] T9 浏览器实测：隔离实例（`MD_BASE_DIR`/`MD_SETS_FILE`/`MD_INDEX_DB` 全在 `/tmp/md-verify`，`MD_PORT=3011`）+ headless Chromium 断言目录 DOM（实体、KaTeX 渲染数、纯公式标题可点）。
 - [x] T10 文档：本 spec 目录 + `specs/README.md` 现状清单。
-- [ ] T11 上线（需用户批准 `docker compose up -d --build`）。
+- [x] T11 上线：2026-09-29 `docker compose up -d --build`（镜像 `f0f2de942c7a`），容器内 healthz 与 `/api/notes` 核对通过。
