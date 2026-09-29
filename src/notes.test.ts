@@ -7,6 +7,7 @@ import {
   applyNoteToFile,
   buildNoteLine,
   deleteNote,
+  extractNotes,
   insertNote,
   isNoteLine,
   NoteError,
@@ -190,5 +191,41 @@ describe('落盘 applyNoteToFile', () => {
     const p = writeTmp('guard.md', '# 标题\n正文\n');
     expect(() => applyNoteToFile(p, { op: 'update', line: 2, text: 'x' })).toThrowError(/不是笔记行/);
     expect(fs.readFileSync(p, 'utf8')).toBe('# 标题\n正文\n');
+  });
+});
+
+// 侧栏「笔记」面板要按文件列出全部笔记；提取口径必须与渲染一致
+// （render.ts 的 notePlugin 是块级规则，代码围栏里的 `> note:` 不会被渲染成笔记卡片）。
+describe('extractNotes：正文里的笔记清单', () => {
+  it('按行号提取，行号是 1-based', () => {
+    const body = '# 标题\n\n> note: 第一条\n正文\n> note:第二条\n';
+    expect(extractNotes(body)).toEqual([
+      { line: 3, text: '第一条' },
+      { line: 5, text: '第二条' },
+    ]);
+  });
+
+  it('CRLF 也按行号对齐，且不留 \\r', () => {
+    expect(extractNotes('# t\r\n> note: win\r\n')).toEqual([{ line: 2, text: 'win' }]);
+  });
+
+  it('跳过 ``` 围栏里的假笔记', () => {
+    const body = '```md\n> note: 代码里的示例\n```\n> note: 真的笔记\n';
+    expect(extractNotes(body)).toEqual([{ line: 4, text: '真的笔记' }]);
+  });
+
+  it('跳过 ~~~ 围栏，且支持更长的围栏与 js 之类信息串', () => {
+    const body = '~~~js\n> note: 示例\n~~~\n\n````\n> note: 也是代码\n````\n> note: 真\n';
+    expect(extractNotes(body)).toEqual([{ line: 8, text: '真' }]);
+  });
+
+  it('四空格缩进的代码块、普通引用、`> notes:` 都不算笔记', () => {
+    const body = '    > note: 缩进代码\n> 普通引用\n> notes: 复数\n> note: 真\n';
+    expect(extractNotes(body)).toEqual([{ line: 4, text: '真' }]);
+  });
+
+  it('空正文 / 没有笔记时返回空数组', () => {
+    expect(extractNotes('')).toEqual([]);
+    expect(extractNotes('# 只有正文\n')).toEqual([]);
   });
 });

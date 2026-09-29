@@ -55,10 +55,19 @@ export interface SetsResponse {
   sets: SpaceSet[];
 }
 
+/** 目录条目里的一段：纯文本，或要用 KaTeX 渲染的行内公式（见 src/render.ts headingContent）。 */
+export interface TocPart {
+  type: 'text' | 'math';
+  value: string;
+}
+
 export interface Heading {
   level: number;
+  /** 纯文本兜底（实体已解码、公式为 LaTeX 原文）。 */
   text: string;
   id: string;
+  /** 仅在标题里出现公式时给出：按片段渲染，否则直接用 text。 */
+  parts?: TocPart[];
 }
 
 export interface RenderResult {
@@ -69,6 +78,27 @@ export interface RenderResult {
   /** 磁盘 mtime：写笔记时用作乐观锁，避免覆盖别处的改动。 */
   mtimeMs?: number;
   [key: string]: unknown;
+}
+
+/** 一条笔记（`> note: 内容` 一行）：行号 1-based，text 是笔记正文的原始 markdown。 */
+export interface NoteRef {
+  line: number;
+  text: string;
+}
+
+/** 有笔记的文档（`GET /api/notes`，见 specs/notes-browse/）。 */
+export interface NoteFile {
+  path: string;
+  title: string;
+  name: string;
+  dir: string;
+  notes: NoteRef[];
+}
+
+export interface NotesResponse {
+  files: NoteFile[];
+  /** 笔记总条数。 */
+  count: number;
 }
 
 /** POST /api/notes 的请求体：笔记的插入 / 改写 / 删除（见 specs/notes/）。 */

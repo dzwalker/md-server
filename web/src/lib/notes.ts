@@ -236,3 +236,42 @@ export function startNoteEditor(
     },
   });
 }
+
+// ===== 笔记在侧栏/目录里的一行预览 =====
+
+/**
+ * 笔记正文的**单行预览**：去掉行内 markdown 记号，只留可读文字。
+ *
+ * 公式保留 LaTeX 原文（`$E=mc^2$` → `E=mc^2`）——目录/侧栏是单行截断的窄条，
+ * 这里渲染 KaTeX 会把行高顶开，正文里的公式仍然是正常渲染的。
+ */
+export function notePreview(text: string): string {
+  return String(text ?? '')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2')
+    .replace(/\[\[([^\]]+)\]\]/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/(\*\*|__)(.+?)\1/g, '$2')
+    .replace(/(\*|_)(.+?)\1/g, '$2')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** 正文里定位一条笔记（跳转用）：滚到它并短暂高亮，让用户看清落点。 */
+export function scrollToNote(line: number, behavior: ScrollBehavior = 'auto'): boolean {
+  const el = document.querySelector<HTMLElement>(`.md-content .md-note[data-note-line="${line}"]`);
+  if (!el) return false;
+  el.scrollIntoView({ behavior, block: 'start' });
+  flashNote(el);
+  return true;
+}
+
+/** 笔记落点闪烁：1.2s 后自动摘掉（时长与 index.css 的 .md-note-flash 动画一致）。 */
+export function flashNote(el: HTMLElement): void {
+  el.classList.remove('md-note-flash');
+  // 强制回流，确保连续两次跳转同一条笔记时动画能重新播放。
+  void el.offsetWidth;
+  el.classList.add('md-note-flash');
+  window.setTimeout(() => el.classList.remove('md-note-flash'), 1300);
+}

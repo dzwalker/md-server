@@ -15,7 +15,16 @@ const emoji = (emojiModule as any).full || (emojiModule as any).default?.full ||
 const taskLists = (taskListsModule as any).default || taskListsModule;
 const footnote = (footnoteModule as any).default || footnoteModule;
 
-export interface TocHeading { level: number; text: string; id: string; }
+/** 目录条目里的一段内容：纯文本，或需要前端用 KaTeX 渲染的行内公式。 */
+export interface TocPart { type: 'text' | 'math'; value: string; }
+export interface TocHeading {
+  level: number;
+  /** 纯文本（实体已解码、公式为 LaTeX 原文）：无 parts 时直接显示，也用于无障碍标签。 */
+  text: string;
+  id: string;
+  /** 仅在标题里出现公式时给出：有序片段，前端据此在目录中渲染 KaTeX。 */
+  parts?: TocPart[];
+}
 export interface RenderResult { html: string; headings: TocHeading[]; }
 
 const md = MarkdownIt({
@@ -38,6 +47,19 @@ const md = MarkdownIt({
 
 md.use(anchor, {
   level: [1, 2, 3, 4, 5, 6],
+  // 默认取词只认 text/code_inline：整条标题就是一个公式（`### $F_1$`）时会得到空 slug → id=""，
+  // 这类标题既进不了目录也点不动。默认取词为空时兜底把公式源码算进去。
+  getTokensText: (tokens: any[]) => {
+    const text = tokens
+      .filter((t) => t.type === 'text' || t.type === 'code_inline')
+      .map((t) => t.content)
+      .join('');
+    if (text.trim()) return text;
+    return tokens
+      .filter((t) => t.type === 'math_inline' || t.type === 'math_block')
+      .map((t) => t.content)
+      .join('');
+  },
   slugify: (s: string) =>
     s.toLowerCase().trim().replace(/<[^>]+>/g, '').replace(/[^\w\u4e00-\u9fff\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, ''),
 });
@@ -280,14 +302,93 @@ const defaultImageRenderer = (md as any).renderer.rules.image ||
   return defaultImageRenderer(tokens, idx, options, env, self);
 };
 
-const headingRegex = /<h([1-6])\s+id="([^"]+)"[^>]*>(.+?)<\/h[1-6]>/g;
+// 标题内容用 [\s\S]：行内位置的 `$$…$$` 走 math_block 渲染器，会在 </hN> 前留一个换行。
+const headingRegex = /<h([1-6])\s+id="([^"]+)"[^>]*>([\s\S]+?)<\/h[1-6]>/g;
+
+// 正文里的公式占位符（见 katexPlugin 的 renderer 规则）。
+const katexSpanRegex = /<span class="katex-(?:math|block)"[^>]*>([\s\S]*?)<\/span>/g;
+
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: '\u00a0',
+};
+
+function fromCodePoint(code: number): string | null {
+  try {
+    return String.fromCodePoint(code);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 还原 markdown-it escapeHtml 出来的实体。
+ *
+ * 目录直接用标题 HTML 去标签后的文本，实体（`"` → `&quot;`）会原样显示在界面上，
+ * 所以要解码一次；只解一次，源码里字面写的 `&quot;`（渲染成 `&amp;quot;`）仍显示为字面量，
+ * 与正文的显示语义保持一致。
+ */
+function decodeEntities(input: string): string {
+  return input.replace(/&(?:#(\d+)|#[xX]([0-9a-fA-F]+)|([a-zA-Z][a-zA-Z0-9]*));/g, (whole, dec, hex, named) => {
+    if (dec !== undefined) return fromCodePoint(parseInt(dec, 10)) ?? whole;
+    if (hex !== undefined) return fromCodePoint(parseInt(hex, 16)) ?? whole;
+    const key = String(named).toLowerCase();
+    return key in NAMED_ENTITIES ? NAMED_ENTITIES[key] : whole;
+  });
+}
+
+function pushTextPart(parts: TocPart[], html: string) {
+  const value = decodeEntities(html.replace(/<[^>]*>/g, ''));
+  if (!value) return;
+  const prev = parts[parts.length - 1];
+  if (prev && prev.type === 'text') prev.value += value;
+  else parts.push({ type: 'text', value });
+}
+
+/**
+ * 标题的行内 HTML → 目录条目：纯文本 + （有公式时）有序片段。
+ *
+ * 加粗/代码/链接只取文字；公式单独成段，前端在目录里用 KaTeX 渲染，
+ * 而不是把 `E=mc^2` 这样的裸 LaTeX 显示出来。
+ */
+function headingContent(innerHtml: string): { text: string; parts?: TocPart[] } {
+  const parts: TocPart[] = [];
+  let hasMath = false;
+  let last = 0;
+  katexSpanRegex.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = katexSpanRegex.exec(innerHtml)) !== null) {
+    pushTextPart(parts, innerHtml.slice(last, m.index));
+    parts.push({ type: 'math', value: decodeEntities(m[1]) });
+    hasMath = true;
+    last = m.index + m[0].length;
+  }
+  pushTextPart(parts, innerHtml.slice(last));
+  // math_block 渲染器会补一个换行：裁掉目录条目首尾的空白（中间的照旧，靠 HTML 折叠空格）
+  if (parts.length && parts[0].type === 'text') parts[0].value = parts[0].value.replace(/^\s+/, '');
+  if (parts.length && parts[0].type === 'text' && !parts[0].value) parts.shift();
+  const tail = parts[parts.length - 1];
+  if (tail && tail.type === 'text') {
+    tail.value = tail.value.replace(/\s+$/, '');
+    if (!tail.value) parts.pop();
+  }
+  const text = parts.map((p) => p.value).join('');
+  return hasMath ? { text, parts } : { text };
+}
 
 export function renderMarkdown(content: string, baseDir = ''): RenderResult {
   const rendered = md.render(content, { baseDir });
   const headings: TocHeading[] = [];
   let match: RegExpExecArray | null;
   while ((match = headingRegex.exec(rendered)) !== null) {
-    headings.push({ level: parseInt(match[1], 10), text: match[3].replace(/<[^>]+>/g, ''), id: match[2] });
+    const { text, parts } = headingContent(match[3]);
+    const heading: TocHeading = { level: parseInt(match[1], 10), text, id: match[2] };
+    if (parts) heading.parts = parts;
+    headings.push(heading);
   }
   return { html: rendered, headings };
 }

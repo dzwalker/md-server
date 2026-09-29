@@ -2,6 +2,7 @@ import { PanelLeftClose } from 'lucide-react';
 import { ACTIVITIES, type ActivityId } from '@/lib/activities';
 import { useStore } from '@/state/store';
 import { ExplorerPanel } from './sidebar/explorer-panel';
+import { NotesPanel } from './sidebar/notes-panel';
 import { OpenedPanel } from './sidebar/opened-panel';
 import { TagsPanel } from './sidebar/tags-panel';
 import { FavoritesPanel } from './sidebar/favorites-panel';
@@ -13,8 +14,11 @@ interface SidebarProps {
   onCollapse: () => void;
 }
 
-function renderPanel(active: ActivityId) {
+function renderPanel(active: ActivityId, isActive: boolean) {
   switch (active) {
+    case 'notes':
+      // 面板常驻挂载（切 tab 不丢搜索词/展开态），isActive 只用来触发首次加载。
+      return <NotesPanel isActive={isActive} />;
     case 'opened':
       return <OpenedPanel />;
     case 'tags':
@@ -60,7 +64,7 @@ export function Sidebar({ active, onCollapse }: SidebarProps) {
             （如资源管理器里目录的展开/收起、搜索词、标签选中等）。 */}
         {ACTIVITIES.map((a) => (
           <div key={a.id} className={a.id === active ? 'h-full' : 'hidden'}>
-            {renderPanel(a.id)}
+            {renderPanel(a.id, a.id === active)}
           </div>
         ))}
       </div>

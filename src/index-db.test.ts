@@ -20,7 +20,7 @@ const Database = require('better-sqlite3');
 const {
   rebuildIndex, indexFiles, indexFilesInBatches, removeIndexPaths, removeIndexPrefix,
   searchFiles, indexStats, listFileSummaries, getFileMeta, outlinks, backlinks,
-  listRecentFiles,
+  listRecentFiles, listNotes,
 } = await import('./index-db.js');
 const { toMdFile, scanRoot } = await import('./scanner.js');
 
@@ -170,5 +170,42 @@ describe('最近更新 listRecentFiles', () => {
     const [top] = listRecentFiles({ dirs: ['r2'], limit: 1 });
     expect(top).toMatchObject({ path: '/r2/x.md', title: 'x', dir: '/r2', name: 'x.md' });
     expect(top.mtimeMs).toBe(BASE + 900);
+  });
+});
+
+// 侧栏「笔记」面板：按空间汇总笔记。直接读 files.body 现算（不新增表、不改索引流程），
+// 提取口径复用 notes.ts 的 extractNotes（代码围栏里的假笔记不算）。
+describe('笔记清单 listNotes', () => {
+  function seedNote(dirName: string, name: string, body: string): string {
+    const p = path.join(tmpRoot, dirName, name);
+    fs.writeFileSync(p, body);
+    indexFiles([toMdFile(p)!]);
+    return `/${dirName}/${name}`;
+  }
+
+  it('按文件聚合，行号与正文一致；没有笔记的文件不返回', () => {
+    seedNote('r1', 'n1.md', '# N1\n\n> note: 第一条\n正文\n> note: 第二条\n');
+    seedNote('r1', 'n2.md', '# N2\n\n没有笔记\n');
+
+    const list = listNotes({ dirs: ['r1'] });
+    expect(list.map((f) => f.path)).toEqual(['/r1/n1.md']);
+    expect(list[0].notes).toEqual([
+      { line: 3, text: '第一条' },
+      { line: 5, text: '第二条' },
+    ]);
+    expect(list[0]).toMatchObject({ title: 'N1', name: 'n1.md', dir: '/r1' });
+  });
+
+  it('代码围栏里的假笔记不算（与渲染口径一致）', () => {
+    seedNote('r1', 'n3.md', '# N3\n\n```md\n> note: 示例\n```\n');
+    expect(listNotes({ dirs: ['r1'] }).map((f) => f.path)).not.toContain('/r1/n3.md');
+  });
+
+  it('dirs 过滤只返回该空间目录；不传 dirs 则是全局', () => {
+    seedNote('r2', 'n4.md', '# N4\n\n> note: 另一个空间\n');
+    expect(listNotes({ dirs: ['r2'] }).map((f) => f.path)).toEqual(['/r2/n4.md']);
+    expect(listNotes({ dirs: ['r1', 'r2'] }).map((f) => f.path)).toEqual(['/r1/n1.md', '/r2/n4.md']);
+    expect(listNotes().map((f) => f.path)).toEqual(expect.arrayContaining(['/r1/n1.md', '/r2/n4.md']));
+    expect(listNotes({ dirs: ['nope'] })).toEqual([]);
   });
 });

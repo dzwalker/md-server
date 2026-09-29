@@ -6,7 +6,9 @@
 
 - 多空间（roots）扫描与热更
 - Markdown 渲染：GFM 任务列表 / 脚注 / emoji / KaTeX 数学 / mermaid / 代码高亮 / CJK 友好强调（`**"中文"**中文` 能加粗，见 `specs/cjk-friendly-emphasis/`）
+- 右侧目录：标题里的引号实体正常显示、公式用 KaTeX 同步渲染，纯公式标题也在目录里（见 `specs/toc-heading-render/`）
 - 正文笔记（`> note: 内容` 一行，见 `specs/notes/`）：预览里右键「插入笔记」、已有笔记右键「编辑 / 删除」；就地编辑 + 保存/取消，直接写回 md 文件（唯一写文件接口，只改笔记行，带 mtime 乐观锁）
+- 笔记浏览（见 `specs/notes-browse/`）：右侧目录里的笔记开关（笔记挂在所属标题下一级、点击跳转 + 落点高亮）；侧栏「笔记」tab 按 空间一级目录 → 有笔记的文件 → 每条笔记 三级浏览，支持收起与按文字搜索
 - SQLite 全文检索（FTS5 trigram）+ 中文拼音检索
 - 标签 / 双链 backlink / outlink / 关系图谱
 - 收藏置顶 / 待办 / 到期任务（`(due: YYYY-MM-DD)`，供 n8n 到期提醒消费）

@@ -67,3 +67,58 @@ describe('CJK-friendly 强调', () => {
     expect(renderMarkdown('```\n**literal**中文\n```').html).toContain('**literal**中文');
   });
 });
+
+// 右侧「目录」直接用 headings[].text 渲染。此前 text 是「渲染后的标题 HTML 去标签」，
+// 于是 markdown-it 转义的实体（" → &quot;）原样怼到界面上，公式也退化成裸 LaTeX。
+describe('TOC 标题提取', () => {
+  it('实体解码：未配对的引号/与号/尖括号还原成字符', () => {
+    const { headings } = renderMarkdown('# 分辨率 5" 屏幕 &amp; <尖括号>');
+    expect(headings[0].text).toBe('分辨率 5" 屏幕 & <尖括号>');
+  });
+
+  it('成对的直引号由 typographer 变弯引号（与正文一致，不是 &quot;）', () => {
+    const { headings } = renderMarkdown('# 标题 "引号"');
+    expect(headings[0].text).toBe('标题 “引号”');
+  });
+
+  it('源码里字面写的实体保持字面（与正文一致）', () => {
+    const { headings } = renderMarkdown('# 转义 &amp;quot; 与 &amp;amp;');
+    expect(headings[0].text).toBe('转义 &quot; 与 &amp;');
+  });
+
+  it('行内标记（加粗/代码/链接）退化为纯文本，且不带 parts', () => {
+    const { headings } = renderMarkdown('# 中文 **加粗** 与 `代码` 与 [链接](http://x)');
+    expect(headings[0].text).toBe('中文 加粗 与 代码 与 链接');
+    expect(headings[0].parts).toBeUndefined();
+  });
+
+  it('行内公式拆成 parts，供目录里用 KaTeX 渲染', () => {
+    const { headings } = renderMarkdown('## 公式 $E=mc^2$ 与 $a<b$ 结束');
+    expect(headings[0].text).toBe('公式 E=mc^2 与 a<b 结束');
+    expect(headings[0].parts).toEqual([
+      { type: 'text', value: '公式 ' },
+      { type: 'math', value: 'E=mc^2' },
+      { type: 'text', value: ' 与 ' },
+      { type: 'math', value: 'a<b' },
+      { type: 'text', value: ' 结束' },
+    ]);
+  });
+
+  it('标题以公式开头/结尾时不留空文本片段', () => {
+    const { headings } = renderMarkdown('# $x^2$');
+    expect(headings[0].parts).toEqual([{ type: 'math', value: 'x^2' }]);
+    // 顺带：纯公式标题过去 slug 为空 → id=""，在目录里直接消失；现在要有可用 id
+    expect(headings[0].id).toBe('x2');
+  });
+
+  it('公式片段与正文同源：只解一层实体，和正文 span 的文本一致', () => {
+    const { html, headings } = renderMarkdown('# $a &lt; b$');
+    expect(html).toContain('<span class="katex-math">a &amp;lt; b</span>');
+    expect(headings[0].parts).toEqual([{ type: 'math', value: 'a &lt; b' }]);
+  });
+
+  it('$$ 公式（行内位置的 math_block）也进 parts', () => {
+    const { headings } = renderMarkdown('# $$\\frac{a}{b}$$');
+    expect(headings[0].parts).toEqual([{ type: 'math', value: '\\frac{a}{b}' }]);
+  });
+});

@@ -61,6 +61,39 @@ export function isNoteLine(line: string): boolean {
   return NOTE_LINE_RE.test(line);
 }
 
+/**
+ * 提取正文里的全部笔记行（侧栏「笔记」面板用）。
+ *
+ * 与渲染口径一致：`render.ts` 的 notePlugin 是**块级**规则，代码围栏（``` / ~~~）里的
+ * `> note:` 不会被渲染成笔记卡片，所以这里也必须跳过围栏内容，否则面板里会出现
+ * 正文里根本不存在的「幽灵笔记」。
+ */
+export function extractNotes(body: string): { line: number; text: string }[] {
+  const out: { line: number; text: string }[] = [];
+  if (!body) return out;
+  const lines = body.split('\n');
+  // 打开的围栏标记本身（含长度）；null = 不在围栏里。
+  let fence: string | null = null;
+  for (let i = 0; i < lines.length; i += 1) {
+    const raw = lines[i].endsWith('\r') ? lines[i].slice(0, -1) : lines[i];
+    const m = /^ {0,3}(`{3,}|~{3,})/.exec(raw);
+    if (fence) {
+      // 关闭围栏：同种字符、不短于开启它的长度、后面只有空白。
+      if (m && m[1][0] === fence[0] && m[1].length >= fence.length && raw.slice(m[0].length).trim() === '') {
+        fence = null;
+      }
+      continue;
+    }
+    if (m) {
+      fence = m[1];
+      continue;
+    }
+    const note = NOTE_LINE_RE.exec(raw);
+    if (note) out.push({ line: i + 1, text: note[1] });
+  }
+  return out;
+}
+
 /** 取笔记正文（去掉 `> note:` 前缀）；非笔记行返回 null。 */
 export function noteTextOf(line: string): string | null {
   const m = NOTE_LINE_RE.exec(line);

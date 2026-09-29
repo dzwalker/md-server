@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scanAll } from './scanner.js';
 import type { MdFile } from './scanner.js';
+import { extractNotes } from './notes.js';
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
 const matter = require('gray-matter');
@@ -435,6 +436,35 @@ export function listRecentFiles(opts: { dirs?: string[]; limit?: number } = {}):
     path: r.path, title: r.title || r.name || r.path, name: r.name || r.path.split('/').pop(),
     dir: r.dir, mtimeMs: r.mtime_ms || 0,
   }));
+}
+
+/**
+ * 全库笔记清单（侧栏「笔记」面板用）：按文件聚合 `> note:` 行。
+ *
+ * 直接读 files 表里已经存好的 body 现算——不新增表、不改索引流程、无迁移；
+ * 提取口径复用 notes.ts 的 extractNotes（代码围栏里的假笔记不算，与渲染一致）。
+ * dirs 为「空间目录名」列表（set.dirs），按 urlPath 前缀过滤；不传则全局。
+ */
+export function listNotes(opts: { dirs?: string[] } = {}): {
+  path: string; title: string; name: string; dir: string;
+  notes: { line: number; text: string }[];
+}[] {
+  const dirs = (opts.dirs || []).map((d) => String(d).replace(/^\/+|\/+$/g, '')).filter(Boolean);
+  const where = dirs.length ? ` WHERE (${dirs.map(() => 'path LIKE ?').join(' OR ')})` : '';
+  const params: unknown[] = dirs.map((d) => `/${d}/%`);
+  const rows = init()
+    .prepare(`SELECT path, title, name, dir, body FROM files${where} ORDER BY path`)
+    .all(...params) as any[];
+  const out: { path: string; title: string; name: string; dir: string; notes: { line: number; text: string }[] }[] = [];
+  for (const r of rows) {
+    const notes = extractNotes(r.body || '');
+    if (!notes.length) continue;
+    out.push({
+      path: r.path, title: r.title || r.name || r.path, name: r.name || r.path.split('/').pop(),
+      dir: r.dir, notes,
+    });
+  }
+  return out;
 }
 
 // ---------- 收藏 / 置顶 ----------

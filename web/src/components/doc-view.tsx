@@ -23,6 +23,7 @@ import { renderExtras, highlightContent } from '@/lib/markdown-extras';
 import { findAnchor, resolveMarkdownLink, resolveWikilink } from '@/lib/doc-links';
 import {
   closeActiveNoteEditor,
+  flashNote,
   resolveNoteContext,
   startInsertEditor,
   startNoteEditor,
@@ -238,7 +239,11 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     const el = contentRef.current;
     if (!el) return;
     const targetEl = findAnchor(el, scrollTarget.anchor);
-    if (targetEl) targetEl.scrollIntoView({ behavior: 'auto', block: 'start' });
+    if (targetEl) {
+      targetEl.scrollIntoView({ behavior: 'auto', block: 'start' });
+      // 跳到某条笔记（侧栏「笔记」面板）时闪一下，落点才看得见。
+      if (targetEl.classList.contains('md-note')) flashNote(targetEl);
+    }
     clearScrollTarget();
   }, [activeRender, activeDoc, scrollTarget, clearScrollTarget]);
 

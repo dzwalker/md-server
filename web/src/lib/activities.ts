@@ -5,10 +5,11 @@ import {
   Star,
   Layers,
   Settings,
+  NotebookPen,
   type LucideIcon,
 } from 'lucide-react';
 
-export type ActivityId = 'explorer' | 'opened' | 'tags' | 'favorites' | 'spaces' | 'settings';
+export type ActivityId = 'explorer' | 'notes' | 'opened' | 'tags' | 'favorites' | 'spaces' | 'settings';
 
 export interface Activity {
   id: ActivityId;
@@ -18,6 +19,7 @@ export interface Activity {
 
 export const ACTIVITIES: Activity[] = [
   { id: 'explorer', label: '资源管理器', icon: FolderOpen },
+  { id: 'notes', label: '笔记', icon: NotebookPen },
   { id: 'opened', label: '已打开的文档', icon: FileText },
   { id: 'tags', label: '标签', icon: Tag },
   { id: 'favorites', label: '收藏', icon: Star },

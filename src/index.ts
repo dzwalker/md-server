@@ -9,7 +9,7 @@ import type { MdFile } from './scanner.js';
 import type { Root } from './config.js';
 import { renderMarkdown } from './render.js';
 import { applyNoteToFile, NoteError, toNoteOpInput, type NoteOpInput } from './notes.js';
-import { rebuildIndex, syncIndex, removeIndexPrefixInBatches, searchFiles, listTags, indexStats, backlinks, outlinks, graph, listFavorites, setFavorite, removeFavorite, listTodos, listDueTasks, indexFiles, indexFilesInBatches, removeIndexPaths, removeIndexPrefix, listFileSummaries, listFilesMeta, getFileMeta, listRecentFiles, truncateWal } from './index-db.js';
+import { rebuildIndex, syncIndex, removeIndexPrefixInBatches, searchFiles, listTags, indexStats, backlinks, outlinks, graph, listFavorites, setFavorite, removeFavorite, listTodos, listDueTasks, indexFiles, indexFilesInBatches, removeIndexPaths, removeIndexPrefix, listFileSummaries, listFilesMeta, getFileMeta, listRecentFiles, listNotes, truncateWal } from './index-db.js';
 import { startMcp } from './mcp.js';
 import { buildEmbeddings, embedFiles, deleteEmbeddings, deleteEmbeddingsByPrefix, semanticSearch, embeddingsStatus } from './embed.js';
 import { createRequire } from 'node:module';
@@ -104,6 +104,17 @@ app.post('/api/notes', async (req, reply) => {
     if (e instanceof NoteError) return reply.code(e.status).send({ error: e.message });
     throw e;
   }
+});
+
+// 笔记清单（只读）：侧栏「笔记」面板按当前空间目录汇总 `> note:` 行，dirs 口径同 /api/recent。
+app.get('/api/notes', async (req) => {
+  const { dirs } = (req.query as any) || {};
+  const list = String(dirs || '')
+    .split(',')
+    .map((d) => d.trim())
+    .filter(Boolean);
+  const files = listNotes({ dirs: list });
+  return { files, count: files.reduce((n, f) => n + f.notes.length, 0) };
 });
 
 app.get('/api/search', async (req) => {

@@ -186,6 +186,12 @@
 .md-content mark { background: #ffe58f; color: #000; padding: 0 1px; border-radius: 2px; }
 .md-content a { color: var(--md-accent, #0969da); text-decoration: var(--md-link-underline, none); }
 
+/* ==== 目录（右侧 TOC）里的行内公式 ====
+   KaTeX 默认 1.21em，在 14px 的目录条目里会顶出格子；压回 1em 并禁止在公式中间换行。 */
+.md-toc-list .katex { font-size: 1em; }
+.md-toc-list .katex-math { white-space: nowrap; }
+.md-toc-list .katex .base { white-space: nowrap; }
+
 /* ==== 笔记（`> note: 内容` 一行，服务端渲染成卡片；见 specs/notes/）==== */
 .md-content .md-note {
   --note-accent: var(--md-note-border, var(--md-accent, #d97706));
@@ -213,6 +219,16 @@
 .md-content .md-note-body { line-height: 1.7; }
 .md-content .md-note-body > :first-child { margin-top: 0; }
 .md-content .md-note-body > :last-child { margin-bottom: 0; }
+
+/* 从侧栏/目录跳到某条笔记时的落点闪烁（时长与 lib/notes.ts 的 flashNote 对齐）。 */
+.md-content .md-note-flash {
+  animation: md-note-flash 1.2s ease-out;
+}
+@keyframes md-note-flash {
+  0% { box-shadow: 0 0 0 3px var(--note-accent, #d97706); }
+  70% { box-shadow: 0 0 0 3px var(--note-accent, #d97706); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
 
 /* 就地编辑器（保存 / 取消）：输入区自己是一块「田」，聚焦时整块给环，而不是给 textarea 描边 */
 .md-content .md-note-editor { margin-top: 8px; }

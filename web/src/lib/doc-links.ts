@@ -64,8 +64,11 @@ export function resolveWikilink(
 }
 
 // 在已渲染的正文容器里按 id 找锚点（精确 → 忽略大小写兜底，因 slugify 会小写化）。
+// `note:<行号>` 是笔记专用锚点（侧栏「笔记」面板跳转用）：笔记卡片没有 id，按 data 属性定位。
 export function findAnchor(root: HTMLElement, anchor: string): HTMLElement | null {
   if (!anchor) return null;
+  const note = /^note:(\d+)$/.exec(anchor);
+  if (note) return root.querySelector<HTMLElement>(`.md-note[data-note-line="${note[1]}"]`);
   try {
     const el = root.querySelector<HTMLElement>(`#${CSS.escape(anchor)}`);
     if (el) return el;

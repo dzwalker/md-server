@@ -4,6 +4,7 @@ import type {
   GraphData,
   NoteRequest,
   NoteResponse,
+  NotesResponse,
   RawFile,
   RecentFile,
   RenderResult,
@@ -89,6 +90,13 @@ export const api = {
   saveSets: (sets: SpaceSet[]) => post<SetsResponse>('/api/sets', sets),
 
   render: (path: string) => get<RenderResult>(`/api/render${path}`),
+  // 笔记清单（只读）：侧栏「笔记」面板按当前空间目录汇总 `> note:` 行。
+  notes: (opts?: { dirs?: string[] }) => {
+    const p = new URLSearchParams();
+    if (opts?.dirs?.length) p.set('dirs', opts.dirs.join(','));
+    const qs = p.toString();
+    return get<NotesResponse>(`/api/notes${qs ? `?${qs}` : ''}`);
+  },
   // 笔记（`> note: 内容`）的插入 / 改写 / 删除：服务里唯一会写 md 文件的接口。
   saveNote: (req: NoteRequest) => post<NoteResponse>('/api/notes', req),
   // 原始文件内容（后端 /api/files/* 读磁盘原文），用于「下载 md 文件」。
