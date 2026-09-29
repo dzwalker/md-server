@@ -198,12 +198,15 @@ function mountEditor(host: HTMLElement, opts: MountOptions): void {
 /**
  * 插入一条新笔记：先在锚点块之后就地位放一张临时卡片（此时**不写文件**），
  * 保存才落盘；取消直接丢弃。
+ *
+ * 返回这张临时卡片：保存成功后调用方会用它做「局部替换」——把服务端渲染好的
+ * 正式卡片换到它的位置，从而不用整篇重注入正文（见 `note-patch.ts`）。
  */
 export function startInsertEditor(
   container: HTMLElement,
   anchor: HTMLElement | null,
   onSave: (text: string) => Promise<void>,
-): void {
+): HTMLElement {
   const block = document.createElement('div');
   block.className = 'md-note md-note-editing';
   const label = document.createElement('div');
@@ -216,6 +219,7 @@ export function startInsertEditor(
   else container.appendChild(block);
 
   mountEditor(block, { text: '', onSave, restore });
+  return block;
 }
 
 /** 编辑一条已有笔记：就地隐藏原正文、换成编辑器。 */

@@ -77,6 +77,36 @@ POST /api/notes  { path, op: 'insert'|'update'|'delete', afterLine?, line?, text
 颜色全部走 `--md-note-border`/`--md-accent`，明暗主题与 4 套 md 主题都成立。笔记卡片本身也补了
 `--note-accent` 变量、hover 阴影与更松的行距。
 
+### 7) 修复轮③：保存笔记时整篇重渲染导致的「闪一下」（2026-09-29）
+
+**实测定位**（121 段 / 242 个公式的 fixture，KaTeX 已预热）：点保存 **t+155ms** 整篇 `innerHTML`
+被替换——埋点段落节点永久断开；替换瞬间 **242/242 个公式全部退回未渲染占位**（页面上就是原始
+TeX），最后一个公式要约 **195ms** 后才补完；期间还连带 mermaid 重画、图片重解码。
+根因是「整篇替换」这个动作本身：`/api/render` 给的是未做二次渲染的 HTML（公式是占位 span），
+前端注入后再补妆。
+
+**做法（方案 A：只换一个节点）**：
+
+- 正文注入由 React 的 `dangerouslySetInnerHTML` 改成**命令式 layout effect**：用
+  `{ 容器元素, key=activeDoc+html }` 记录「DOM 里当前是哪一份 HTML」，key 变了才整篇重写；
+  容器元素换了（切到图谱这类工具文档会让正文容器卸载重挂）也一定会重写。
+- 新增 `web/src/lib/note-patch.ts`：保存成功后从新的 `/api/render` HTML 里**只取出目标那张笔记卡片**，
+  `replaceWith`（insert 用临时编辑器卡片的位置 / update 用现有卡片）或 `remove`（delete）；
+  插入/删除后把下方块的 `data-line-*` / `data-note-line` **重编号**（只写属性、不触发布局），
+  否则下一次笔记操作会按错行号去写文件；卡片在**脱离文档**的状态下先跑一次 `renderExtras`
+  （KaTeX/mermaid），换进去即是最终形态。结构不符 → 返回 false，调用方回退整篇重注入（复用滚动锚点）。
+- 缓存照旧是**新的**（`cacheRender(fresh)`），只是 DOM 不再被 React 整篇重写；目录里的「笔记」列表
+  本就是读 DOM（`toc-panel.tsx`），配合重编号后天然同步。
+
+**实测对比**：
+
+| 指标 | 修前 | 修后 |
+|---|---|---|
+| 整篇 DOM 替换 | t+155ms 发生 | **不发生**（埋点段落保持连接） |
+| 保存过程中未渲染公式峰值 | 242 / 242 | **0 / 242** |
+| 公式空窗 | 32ms 采样窗口，末个公式 +195ms 补完 | **0ms** |
+| mermaid 图节点 | 重画 | **保持连接（不重画）** |
+
 ### 6) 文档
 
 - 本 spec 三件套；`specs/README.md` 现状列表；`README.md` 功能；`AGENTS.md` 分层表 + 「生产数据只读」原则的精确例外；`.dsh/skills/code-map/SKILL.md` 结构表。

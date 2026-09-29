@@ -35,6 +35,7 @@ import {
   shiftAnchorLine,
   type ScrollAnchor,
 } from '@/lib/scroll-anchor';
+import { patchNoteCard } from '@/lib/note-patch';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -181,6 +182,27 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   useLayoutEffect(() => {
     restoreScroll();
   }, [activeRender, restoreScroll]);
+
+  // 正文注入改为**命令式**：`dangerouslySetInnerHTML` 会让 React 在每次渲染缓存更新时
+  // 整篇重写 innerHTML（保存笔记时就是它把公式/图表全部打回未渲染状态 → 闪一下）。
+  // 现在由这里决定「什么时候真的需要整篇替换」，笔记保存走局部替换（见 note-patch.ts），
+  // 只要 key 没变就不再注入；换了容器节点（如切到图谱再切回）也一定会重新注入。
+  const appliedHtmlRef = useRef<{ el: HTMLElement; key: string } | null>(null);
+  const contentKey = (path: string | null, html: string) => `${path ?? ''}\u0000${html}`;
+
+  useLayoutEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    const html = activeRender?.html ?? '';
+    const key = contentKey(activeDoc, html);
+    const applied = appliedHtmlRef.current;
+    if (applied && applied.el === el && applied.key === key) return;
+    markScrollAnchor();
+    closeActiveNoteEditor();
+    el.innerHTML = html;
+    appliedHtmlRef.current = { el, key };
+    restoreScroll();
+  }, [activeRender, activeDoc, markScrollAnchor, restoreScroll]);
 
   // 工具型「文档」（如图谱）用保留路径 /__tools__/... 打开为 tab
   const isTool = !!activeDoc && activeDoc.startsWith('/__tools__/');
@@ -410,24 +432,34 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     }, 3000);
   }
 
-  // 重新拉一次当前正文：保存笔记后正文要立刻反映磁盘上的新内容（编辑器随之消失）。
-  const refreshActiveRender = useCallback(async () => {
-    if (!activeDoc) return;
-    const r = await api.render(activeDoc);
-    cacheRender(activeDoc, r);
-  }, [activeDoc, cacheRender]);
-
   // 写笔记：带上渲染时看到的 mtimeMs 做乐观锁（服务端不一致会返回 409，绝不覆盖别处改动）。
-  // 写入会让这一行插/改/删，紧接着正文整篇重注入——先记下滚动锚点，
-  // 并按插入/删除造成的行号位移修正锚点行，保证保存后视觉位置不跳。
+  // 保存成功后**只替换这一条笔记的 DOM 节点**（note-patch.ts）：整篇正文不动，
+  // 公式/图表/图片都不重渲染，所以不会再闪。结构不符时才回退整篇重注入（并保住滚动位置）。
   const submitNote = useCallback(
-    async (payload: Omit<NoteRequest, 'path' | 'mtimeMs'>) => {
+    async (payload: Omit<NoteRequest, 'path' | 'mtimeMs'>, tempEl?: HTMLElement | null) => {
       if (!activeDoc) throw new Error('没有打开的文档');
-      markScrollAnchor((line) => shiftAnchorLine(line, payload));
-      await api.saveNote({ path: activeDoc, mtimeMs: activeRender?.mtimeMs, ...payload });
-      await refreshActiveRender();
+      const res = await api.saveNote({ path: activeDoc, mtimeMs: activeRender?.mtimeMs, ...payload });
+      const fresh = await api.render(activeDoc);
+      const el = contentRef.current;
+      const patched =
+        !!el &&
+        (await patchNoteCard(
+          el,
+          fresh.html,
+          { op: payload.op, line: res.line, afterLine: payload.afterLine },
+          tempEl ?? null,
+        ));
+      if (patched && el) {
+        // DOM 已经是新内容：把 key 对齐，注入 effect 就不会再整篇重写。
+        appliedHtmlRef.current = { el, key: contentKey(activeDoc, fresh.html) };
+      } else {
+        // 回退路径：强制整篇注入，并按插入/删除的行号位移修正滚动锚点。
+        appliedHtmlRef.current = null;
+        markScrollAnchor((line) => shiftAnchorLine(line, payload));
+      }
+      cacheRender(activeDoc, fresh);
     },
-    [activeDoc, activeRender, refreshActiveRender, markScrollAnchor],
+    [activeDoc, activeRender, cacheRender, markScrollAnchor],
   );
 
   // 正文右键：已存在的笔记 → 「编辑 / 删除」；其它位置 → 只有「插入笔记」。
@@ -460,7 +492,9 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     if (!t || t.kind !== 'insert') return;
     const el = contentRef.current;
     if (!el) return;
-    startInsertEditor(el, t.anchor, (text) => submitNote({ op: 'insert', afterLine: t.afterLine, text }));
+    const tempEl = startInsertEditor(el, t.anchor, (text) =>
+      submitNote({ op: 'insert', afterLine: t.afterLine, text }, tempEl),
+    );
   }
 
   function onEditNote() {
@@ -612,12 +646,8 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
             style={{ maxWidth: containerMax, gap: TOC_GAP }}
           >
             <div className="min-w-0 flex-1" style={{ maxWidth: mdMax }}>
-              <div
-                ref={contentRef}
-                className="md-content"
-                onClick={onContentClick}
-                dangerouslySetInnerHTML={{ __html: activeRender?.html || '' }}
-              />
+              {/* 正文 HTML 由上面的 useLayoutEffect 命令式注入（保存笔记走局部替换，不整篇重写） */}
+              <div ref={contentRef} className="md-content" onClick={onContentClick} />
               {backlinks.length > 0 && (
                 <div className="mt-8 border-t pt-4">
                   <h2 className="text-sm font-semibold">🔗 反向链接 ({backlinks.length})</h2>

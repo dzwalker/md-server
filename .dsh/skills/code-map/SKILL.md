@@ -32,11 +32,12 @@ whenToUse: 需要理解或修改 md-server 结构时（web/ 前端 React 工程�
 | 弹层 | `src/components/command-palette.tsx` | ⌘P：空态「最近更新」（`/api/recent`，当前空间最近 20 篇），输入后走 `/api/search` |
 | 弹层 | `src/components/opened-switcher.tsx` | ⌘O：已打开文档看板，一列 = 一个一级目录，`←→↑↓` 导航 + Enter 打开 |
 | 侧栏 | `src/components/sidebar*.tsx` | 资源管理器（react-arborist，文件树右键菜单：复制文件名/复制完整路径/下载，见 `specs/explorer-context-menu/`）/ 已打开 / 标签 / 收藏 / 空间 / 设置 |
-| 主区 | `src/components/doc-view.tsx` | 文档头 + tab 栏（dnd-kit 拖拽）+ 正文渲染 + TOC + 正文右键笔记菜单 / 就地编辑 / 删除确认 |
+| 主区 | `src/components/doc-view.tsx` | 文档头 + tab 栏（dnd-kit 拖拽）+ 正文渲染（**命令式注入**：`{el, key}` 决定何时整篇重写，笔记保存走局部替换）+ TOC + 正文右键笔记菜单 / 就地编辑 / 删除确认 |
 | 库 | `src/lib/api.ts`, `lib/types.ts` | HTTP API 封装与响应类型（新增接口同步这两处） |
 | 库 | `src/lib/download.ts`, `lib/clipboard.ts` | 下载 md 原文（`downloadDocByPath`，文档头与右键菜单共用）/ 复制到剪贴板（含非安全上下文降级） |
 | 库 | `src/lib/markdown-extras.ts`, `mermaid-*.ts`, `md-themes.ts` | 客户端二次渲染 katex/mermaid、导出、Markdown 主题 |
 | 库 | `src/lib/notes.ts` | 笔记右键定位（`resolveNoteContext`）+ 就地编辑器（`startInsertEditor` / `startNoteEditor` / `closeActiveNoteEditor`，命令式 DOM） |
+| 库 | `src/lib/note-patch.ts` | 保存笔记时只替换目标那张卡片（整篇 DOM 不动 → 公式/图表不闪），并重编号下方块行号（见 `specs/notes/plan.md` §7） |
 | 库 | `src/lib/scroll-anchor.ts` | 正文整篇重注入时的滚动位置保持（content-visibility 估值漂移的补偿，见 `specs/notes/plan.md` §5） |
 
 - 依赖 API：`/api/tree` `/api/files` `/api/files/*` `/api/render/*` `/api/stat` `/api/notes`（POST，唯一会写 md 的接口）`/api/search` `/api/search-semantic` `/api/recent` `/api/tags` `/api/backlinks/*` `/api/outlinks/*` `/api/graph` `/api/favorites` `/api/todos` `/api/sets` `/api/status` `/api/asset/*`
