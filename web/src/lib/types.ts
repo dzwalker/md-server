@@ -139,6 +139,12 @@ export interface Backlink {
   title?: string;
 }
 
+/** /api/outlinks/* 的响应项：同一目标聚合为一条，count = 正文里出现的次数。 */
+export interface Outlink {
+  target: string;
+  count: number;
+}
+
 export interface GraphNode {
   path: string;
   title: string;

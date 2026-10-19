@@ -371,9 +371,27 @@ export function backlinks(path: string) {
   return rows;
 }
 
-export function outlinks(path: string) {
-  const d = init();
-  return d.prepare('SELECT target FROM links WHERE source = ? ORDER BY target').all(path).map((r: any) => r.target);
+export interface Outlink {
+  /** 正文里的目标名（原样；别名 `|x` 与锚点 `#x` 在索引时已剥掉）。 */
+  target: string;
+  /** 该目标在正文里出现的次数。 */
+  count: number;
+}
+
+/**
+ * 出链：同一目标聚合为一条（带引用次数），按正文首次出现顺序返回。
+ * `links` 表按出现次数存行，`MIN(rowid)` 即首次出现的那次插入；
+ * 增量索引是整文件先删后插，rowid 顺序 = 正文顺序（见 specs/outlinks/）。
+ */
+export function outlinks(path: string): Outlink[] {
+  const rows = init().prepare(`
+    SELECT target, COUNT(*) AS count
+    FROM links
+    WHERE source = ?
+    GROUP BY target
+    ORDER BY MIN(rowid)
+  `).all(path) as { target: string; count: number }[];
+  return rows.map((r) => ({ target: r.target, count: r.count }));
 }
 
 export function graph() {

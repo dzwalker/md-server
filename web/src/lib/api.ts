@@ -5,6 +5,7 @@ import type {
   NoteRequest,
   NoteResponse,
   NotesResponse,
+  Outlink,
   RawFile,
   RecentFile,
   RenderResult,
@@ -103,7 +104,7 @@ export const api = {
   rawFile: (path: string) => get<RawFile>(`/api/files${path}`),
   stat: (path: string) => get<{ exists: boolean; path: string; mtimeMs?: number; size?: number }>(`/api/stat?path=${encodeURIComponent(path)}`),
   backlinks: (path: string) => get<Backlink[]>(`/api/backlinks${path}`),
-  outlinks: (path: string) => get<string[]>(`/api/outlinks${path}`),
+  outlinks: (path: string) => get<Outlink[]>(`/api/outlinks${path}`),
 
   graph: () => get<GraphData>('/api/graph'),
 };

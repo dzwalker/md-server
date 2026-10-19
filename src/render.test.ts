@@ -1,6 +1,68 @@
 import { describe, it, expect } from 'vitest';
 import { renderMarkdown } from './render.js';
 
+// 文档顶部 YAML frontmatter（`---\n...\n---`）渲染成默认收起的「文档信息」折叠块。
+// 以前 markdown-it 会把结尾的 `---` 当 Setext 下划线，把整块 frontmatter 变成 <h2> 混进目录。
+describe('顶部 frontmatter 折叠块', () => {
+  const doc = [
+    '---',
+    'title: E2E 标题',
+    'date: 2026-10-08',
+    'type: 主文档',
+    'evidence: 见 https://example.com/x 与 **重点**',
+    '---',
+    '',
+    '# 正文标题',
+    '',
+    '正文。',
+  ].join('\n');
+
+  it('渲染成 <details>，且默认不带 open（收起）', () => {
+    const { html } = renderMarkdown(doc);
+    expect(html).toContain('<details class="md-frontmatter">');
+    expect(html).toMatch(/<details class="md-frontmatter">\s*<summary/);
+    // 不出现打开属性
+    expect(html).not.toMatch(/<details[^>]*\sopen/);
+  });
+
+  it('不再把整块 YAML 渲染成 <h2>，目录里也没有它', () => {
+    const { html, headings } = renderMarkdown(doc);
+    expect(html).not.toContain('<h2');
+    expect(headings.map((h) => h.text)).toEqual(['正文标题']);
+  });
+
+  it('key/value 逐条渲染；日期只显示日期；值支持行内 markdown', () => {
+    const { html } = renderMarkdown(doc);
+    expect(html).toContain('<dt>title</dt>');
+    expect(html).toContain('<dd>E2E 标题</dd>');
+    // date 被 gray-matter 解析成 Date：只留 YYYY-MM-DD
+    expect(html).toContain('<dd>2026-10-08</dd>');
+    // evidence 里的链接与加粗在折叠区里也生效
+    expect(html).toContain('href="https://example.com/x"');
+    expect(html).toContain('<strong>重点</strong>');
+  });
+
+  it('只消费不删行：frontmatter 之后的块行号锚点仍然正确', () => {
+    const { html } = renderMarkdown(doc);
+    // frontmatter 占 1~6 行（含首尾分隔线），正文标题在第 8 行 → 行号未因消费 frontmatter 而偏移
+    expect(html).toContain('<h1 id="正文标题" tabindex="-1" data-line-start="8" data-line-end="8">');
+    // frontmatter 自身不带行号锚点（不是笔记块的定位目标）
+    expect(html).not.toMatch(/<details[^>]*data-line-end/);
+  });
+
+  it('没有闭合分隔线时不算 frontmatter，交回默认渲染（<hr>）', () => {
+    const { html } = renderMarkdown('---\n\n正文');
+    expect(html).toContain('<hr');
+    expect(html).not.toContain('md-frontmatter');
+  });
+
+  it('文档开头不是 --- 时不受影响（Setext 标题照常）', () => {
+    const { html } = renderMarkdown('普通段落\n---\n');
+    expect(html).not.toContain('md-frontmatter');
+    expect(html).toContain('<h2');
+  });
+});
+
 describe('renderMarkdown 冒烟', () => {
   it('提取标题并渲染 anchor', () => {
     const { html, headings } = renderMarkdown('# 你好世界\n\n正文内容');
@@ -120,5 +182,54 @@ describe('TOC 标题提取', () => {
   it('$$ 公式（行内位置的 math_block）也进 parts', () => {
     const { headings } = renderMarkdown('# $$\\frac{a}{b}$$');
     expect(headings[0].parts).toEqual([{ type: 'math', value: '\\frac{a}{b}' }]);
+  });
+});
+
+// 正文里指向本地「非 md 文件」的相对链接（互动 HTML / PDF / CSV…）：
+// 因 SPA 把地址栏重写成 /set/<id>，相对 href 会被浏览器按错误基址解析 → 被重定向回默认空间。
+// 服务端按文档目录改写为绝对 /api/asset 路径（与图片一致），浏览器即可正确内联打开。
+describe('正文本地资源链接改写', () => {
+  const base = '/learning-ad/concepts';
+
+  it('相对非 md 资源 → 绝对 /api/asset（基于文档目录）', () => {
+    const { html } = renderMarkdown('[互动页](interactive/derivative-interactive.html)', base);
+    expect(html).toContain('href="/api/asset/learning-ad/concepts/interactive/derivative-interactive.html"');
+  });
+
+  it('../ 上跳也按文档目录规范化', () => {
+    const { html } = renderMarkdown('[图](../images/a.png)', base);
+    expect(html).toContain('href="/api/asset/learning-ad/images/a.png"');
+  });
+
+  it('保留 query / #锚点', () => {
+    const { html } = renderMarkdown('[页](interactive/x.html#sec-1)', base);
+    expect(html).toContain('href="/api/asset/learning-ad/concepts/interactive/x.html#sec-1"');
+  });
+
+  it('脚本源码等文本类型同样可点开', () => {
+    const { html } = renderMarkdown('[脚本](interactive/build.py)', base);
+    expect(html).toContain('href="/api/asset/learning-ad/concepts/interactive/build.py"');
+  });
+
+  it('相对 md 链接不动（走前端文档路由）', () => {
+    const { html } = renderMarkdown('[另一篇](./other.md)', base);
+    expect(html).toContain('href="./other.md"');
+    expect(html).not.toContain('/api/asset');
+  });
+
+  it('无扩展名的相对链接不动（当文档链接）', () => {
+    const { html } = renderMarkdown('[姊妹篇](sibling)', base);
+    expect(html).toContain('href="sibling"');
+  });
+
+  it('外链 / 绝对路径 / 纯锚点不动', () => {
+    const { html } = renderMarkdown(
+      '[外链](https://example.com/a.html)\n\n[绝对](/learning-ad/x.html)\n\n[锚点](#top)',
+      base,
+    );
+    expect(html).toContain('href="https://example.com/a.html"');
+    expect(html).toContain('href="/learning-ad/x.html"');
+    expect(html).toContain('href="#top"');
+    expect(html).not.toContain('/api/asset');
   });
 });

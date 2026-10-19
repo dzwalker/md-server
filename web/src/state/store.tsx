@@ -29,7 +29,8 @@ type DocsAction =
   | { type: 'open'; path: string; title: string; query: string | null }
   | { type: 'activate'; path: string }
   | { type: 'close'; path: string }
-  | { type: 'reorder'; from: number; to: number };
+  | { type: 'reorder'; from: number; to: number }
+  | { type: 'hydrate'; docs: DocsState };
 
 function docsReducer(state: DocsState, action: DocsAction): DocsState {
   switch (action.type) {
@@ -59,6 +60,9 @@ function docsReducer(state: DocsState, action: DocsAction): DocsState {
       openDocs.splice(action.to, 0, moved);
       return { ...state, openDocs };
     }
+    case 'hydrate':
+      // 切换空间 set 时整体换入目标 set 的已打开文档（无记录即空 → 全部关闭）。
+      return action.docs;
     default:
       return state;
   }
@@ -118,43 +122,87 @@ interface StoreValue {
 
 const StoreContext = createContext<StoreValue | null>(null);
 
-const OPEN_TABS_KEY = 'md-open-tabs';
+// 已打开的 tab：按「空间 set」分槽持久化。旧版是全局单键 md-open-tabs（仅用于一次性迁移）。
+const OPEN_TABS_BY_SET_KEY = 'md-open-tabs-by-set';
+const LEGACY_OPEN_TABS_KEY = 'md-open-tabs';
+const ACTIVE_SET_KEY = 'md-active-set';
 
-function loadInitialDocs(): DocsState {
-  if (typeof window === 'undefined') return { openDocs: [], activeDoc: null, activeQuery: null };
-  try {
-    const raw = localStorage.getItem(OPEN_TABS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<DocsState>;
-      if (parsed && Array.isArray(parsed.openDocs)) {
-        return {
-          openDocs: (parsed.openDocs as OpenDoc[]).filter(
-            (d) => d && typeof d.path === 'string' && typeof d.title === 'string',
-          ),
-          activeDoc: typeof parsed.activeDoc === 'string' ? parsed.activeDoc : null,
-          activeQuery: typeof parsed.activeQuery === 'string' ? parsed.activeQuery : null,
-        };
-      }
-    }
-  } catch {
-    /* ignore */
-  }
+type DocsMap = Record<string, DocsState>;
+
+function emptyDocs(): DocsState {
   return { openDocs: [], activeDoc: null, activeQuery: null };
 }
 
-export function StoreProvider({ children }: { children: ReactNode }) {
-  const [docs, dispatch] = useReducer(docsReducer, undefined, loadInitialDocs);
+function sanitizeDocs(parsed: unknown): DocsState | null {
+  if (!parsed || typeof parsed !== 'object') return null;
+  const p = parsed as Partial<DocsState>;
+  if (!Array.isArray(p.openDocs)) return null;
+  return {
+    openDocs: (p.openDocs as OpenDoc[]).filter(
+      (d) => d && typeof d.path === 'string' && typeof d.title === 'string',
+    ),
+    activeDoc: typeof p.activeDoc === 'string' ? p.activeDoc : null,
+    activeQuery: typeof p.activeQuery === 'string' ? p.activeQuery : null,
+  };
+}
 
-  // 已打开的 tab 持久化到 localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem(
-        OPEN_TABS_KEY,
-        JSON.stringify({ openDocs: docs.openDocs, activeDoc: docs.activeDoc, activeQuery: docs.activeQuery }),
-      );
-    } catch {
-      /* ignore */
+function loadDocsMap(): DocsMap {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(OPEN_TABS_BY_SET_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const out: DocsMap = {};
+    for (const [k, v] of Object.entries(parsed || {})) {
+      const d = sanitizeDocs(v);
+      if (d) out[k] = d;
     }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function saveDocsMap(map: DocsMap) {
+  try {
+    localStorage.setItem(OPEN_TABS_BY_SET_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+}
+
+// 一次性迁移：旧版全局 tab → 当前 set 的槽位（仅当还没有按 set 的存储时），随后废弃旧键。
+function migrateLegacyTabs(setId: string) {
+  try {
+    const map = loadDocsMap();
+    const raw = localStorage.getItem(LEGACY_OPEN_TABS_KEY);
+    if (raw && Object.keys(map).length === 0) {
+      const legacy = sanitizeDocs(JSON.parse(raw));
+      if (legacy && (legacy.openDocs.length > 0 || legacy.activeDoc)) {
+        map[setId] = legacy;
+        saveDocsMap(map);
+      }
+    }
+    if (raw) localStorage.removeItem(LEGACY_OPEN_TABS_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function StoreProvider({ children }: { children: ReactNode }) {
+  const [docs, dispatch] = useReducer(docsReducer, undefined, emptyDocs);
+  // 镜像当前 docs 与当前 set id，供切换 set 时同步落盘/读取（避免回调闭包拿到旧值）。
+  const docsRef = useRef<DocsState>(docs);
+  const activeSetIdRef = useRef('');
+
+  // 已打开的 tab 按「当前空间 set」分槽持久化；set 尚未解析出来时先不落盘。
+  useEffect(() => {
+    docsRef.current = docs;
+    const id = activeSetIdRef.current;
+    if (!id) return;
+    const map = loadDocsMap();
+    map[id] = docs;
+    saveDocsMap(map);
   }, [docs]);
   const [renderCache, setRenderCache] = useState<Record<string, RenderResult>>({});
   const cacheRender = useCallback((path: string, r: RenderResult) => {
@@ -382,8 +430,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
   }, [refreshData]);
 
-  const ACTIVE_SET_KEY = 'md-active-set';
-
   const refreshSets = useCallback(async () => {
     try {
       const res = await api.sets();
@@ -394,6 +440,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setSetsLoaded(true);
       return [];
     }
+  }, []);
+
+  // 切换当前 set：先把当前 set 的 tab 落盘，再载入目标 set 的 tab（无记录即视为空 → 全部关闭）。
+  const applySet = useCallback((id: string) => {
+    const prev = activeSetIdRef.current;
+    if (prev && prev !== id) {
+      const map = loadDocsMap();
+      map[prev] = docsRef.current;
+      saveDocsMap(map);
+    }
+    activeSetIdRef.current = id;
+    setActiveSetId(id);
+    dispatch({ type: 'hydrate', docs: loadDocsMap()[id] ?? emptyDocs() });
   }, []);
 
   // 启动时加载 sets 并解析当前 set：优先 URL /set/{id}，其次 localStorage，最后第一个 set。
@@ -409,37 +468,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (!ids.includes(id)) id = ids[0] || '';
       setSets(list);
       setSetsLoaded(true);
-      if (id) {
-        setActiveSetId(id);
-        try { localStorage.setItem(ACTIVE_SET_KEY, id); } catch { /* ignore */ }
-        if (!m) {
-          try { window.history.replaceState(null, '', '/set/' + id); } catch { /* ignore */ }
-        }
+      if (!id) return;
+      // 老用户首次升级：把旧版全局 tab 迁到当前 set 的槽位，再载入该 set 的 tab。
+      migrateLegacyTabs(id);
+      applySet(id);
+      try { localStorage.setItem(ACTIVE_SET_KEY, id); } catch { /* ignore */ }
+      if (!m) {
+        try { window.history.replaceState(null, '', '/set/' + id); } catch { /* ignore */ }
       }
     })();
     return () => { alive = false; };
-  }, []);
+  }, [applySet]);
 
-  // 浏览器前进/后退时同步当前 set
+  // 浏览器前进/后退时同步当前 set（并载入该 set 的 tab）。
   useEffect(() => {
     const onPop = () => {
       const m = window.location.pathname.match(/^\/set\/([A-Za-z0-9_-]+)\/?$/);
       if (!m) return;
       try { localStorage.setItem(ACTIVE_SET_KEY, m[1]); } catch { /* ignore */ }
-      setActiveSetId(m[1]);
+      applySet(m[1]);
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
-  }, []);
+  }, [applySet]);
 
   const switchSet = useCallback((id: string) => {
-    setActiveSetId(id);
     try { localStorage.setItem(ACTIVE_SET_KEY, id); } catch { /* ignore */ }
+    applySet(id);
     const target = '/set/' + id;
     if (window.location.pathname !== target) {
       try { window.history.pushState(null, '', target); } catch { /* ignore */ }
     }
-  }, []);
+  }, [applySet]);
 
   const saveSets = useCallback(
     async (next: SpaceSet[]) => {
@@ -447,22 +507,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const res = await api.saveSets(next);
         setSets(res.sets);
         setSetsLoaded(true);
-        setActiveSetId((cur) => {
-          if (res.sets.some((s) => s.id === cur)) return cur;
+        // 当前 set 被删除时回退到第一个 set（并载入其 tab）。
+        if (!res.sets.some((s) => s.id === activeSetIdRef.current)) {
           const fallback = res.sets[0]?.id || '';
           if (fallback) {
             try { localStorage.setItem(ACTIVE_SET_KEY, fallback); } catch { /* ignore */ }
             try { window.history.replaceState(null, '', '/set/' + fallback); } catch { /* ignore */ }
+            applySet(fallback);
+          } else {
+            activeSetIdRef.current = '';
+            setActiveSetId('');
+            dispatch({ type: 'hydrate', docs: emptyDocs() });
           }
-          return fallback;
-        });
+        }
         refreshData();
         return { ok: true };
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : '保存失败' };
       }
     },
-    [refreshData],
+    [refreshData, applySet],
   );
 
   const activeSet = useMemo<SpaceSet | null>(

@@ -186,6 +186,73 @@
 .md-content mark { background: #ffe58f; color: #000; padding: 0 1px; border-radius: 2px; }
 .md-content a { color: var(--md-accent, #0969da); text-decoration: var(--md-link-underline, none); }
 
+/* ==== 顶部 YAML frontmatter（服务端渲染成 <details>，默认收起；见 src/render.ts）==== */
+.md-content .md-frontmatter {
+  margin: 0 0 1.25em;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
+  font-size: 0.9em;
+  overflow: hidden;
+}
+.md-content .md-frontmatter > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  color: var(--md-muted, var(--muted-foreground));
+}
+.md-content .md-frontmatter > summary::-webkit-details-marker { display: none; }
+.md-content .md-frontmatter > summary:hover { color: var(--md-fg, var(--foreground)); }
+.md-content .md-frontmatter > summary:focus-visible { outline: 2px solid var(--md-accent, #0969da); outline-offset: -2px; }
+.md-content .md-frontmatter-label { font-weight: 600; }
+.md-content .md-frontmatter-date { margin-left: auto; font-variant-numeric: tabular-nums; opacity: 0.8; }
+/* 折叠箭头：收起点向右，展开（[open]）旋转向下。 */
+.md-content .md-frontmatter-chevron {
+  flex: none;
+  width: 0;
+  height: 0;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform 0.15s ease;
+}
+.md-content .md-frontmatter[open] > summary {
+  border-bottom: 1px solid var(--border);
+  color: var(--md-fg, var(--foreground));
+}
+.md-content .md-frontmatter[open] .md-frontmatter-chevron { transform: rotate(90deg); }
+.md-content .md-frontmatter-body {
+  margin: 0;
+  padding: 8px 12px 10px;
+  display: grid;
+  gap: 4px 10px;
+}
+.md-content .md-frontmatter-row {
+  display: grid;
+  grid-template-columns: minmax(64px, max-content) 1fr;
+  gap: 4px 10px;
+  align-items: baseline;
+}
+.md-content .md-frontmatter-row > dt {
+  color: var(--md-muted, var(--muted-foreground));
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+  white-space: nowrap;
+}
+.md-content .md-frontmatter-row > dd { margin: 0; word-break: break-word; }
+.md-content .md-frontmatter-empty { opacity: 0.5; }
+.md-content .md-frontmatter-raw {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 8px 12px 10px;
+}
+
 /* ==== 目录（右侧 TOC）里的行内公式 ====
    KaTeX 默认 1.21em，在 14px 的目录条目里会顶出格子；压回 1em 并禁止在公式中间换行。 */
 .md-toc-list .katex { font-size: 1em; }

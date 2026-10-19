@@ -17,7 +17,7 @@ import { X, Star, ListTree, Layers, PanelLeftOpen, Download } from 'lucide-react
 import { useStore, type OpenDoc } from '@/state/store';
 import { api } from '@/lib/api';
 import { downloadDocByPath } from '@/lib/download';
-import type { Backlink, NoteRequest, RenderResult } from '@/lib/types';
+import type { Backlink, NoteRequest, Outlink, RenderResult } from '@/lib/types';
 import { cn, stripMdExt } from '@/lib/utils';
 import { renderExtras, highlightContent } from '@/lib/markdown-extras';
 import { findAnchor, resolveMarkdownLink, resolveWikilink } from '@/lib/doc-links';
@@ -68,6 +68,9 @@ interface TabProps {
   onActivate: () => void;
   onClose: () => void;
 }
+
+// 已渲染正文的 DOM 缓存上限（按文档篇数，LRU 淘汰），避免长时间浏览把内存撑大。
+const DOM_CACHE_MAX = 12;
 
 function SortableTab({ doc, active, showFilename, onActivate, onClose }: TabProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -137,12 +140,16 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   } = useStore();
 
   const contentRef = useRef<HTMLDivElement>(null);
+  // 已渲染正文的 DOM 缓存（键 = 路径\0HTML）：切走时把整块正文节点存起来，切回时整块挪回，
+  // 跳过 innerHTML 重注入与 KaTeX/mermaid 二次渲染 —— 切 tab / 切 set 零延迟、不闪。
+  const domCacheRef = useRef<Map<string, DocumentFragment>>(new Map());
+  const restoredFromCacheRef = useRef(false);
   const tabsBarRef = useRef<HTMLDivElement>(null);
   // 上一次生效的 mermaid 主题：用于区分「首次挂载」和「用户真的换了主题」。
   const prevMermaidThemeRef = useRef(mermaidTheme);
   const { ref: contentAreaRef, width: contentWidth } = useElementSize<HTMLDivElement>();
   const [backlinks, setBacklinks] = useState<Backlink[]>([]);
-  const [outlinks, setOutlinks] = useState<string[]>([]);
+  const [outlinks, setOutlinks] = useState<Outlink[]>([]);
   const [tocOpen, setTocOpen] = useState(true);
   const [downloading, setDownloading] = useState(false);
   // 正文右键菜单（插入笔记 / 编辑 / 删除，见 specs/notes/）
@@ -199,10 +206,34 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     if (applied && applied.el === el && applied.key === key) return;
     markScrollAnchor();
     closeActiveNoteEditor();
-    el.innerHTML = html;
+
+    const cache = domCacheRef.current;
+    // 把上一份已渲染的正文节点整块收进缓存（保留事件监听与 KaTeX/mermaid 渲染成果）。
+    // 带关键词高亮（<mark>）的正文与查询词绑定，不入缓存，避免切回时套错高亮。
+    if (applied && applied.el === el && el.firstChild && !el.querySelector('mark')) {
+      const frag = document.createDocumentFragment();
+      while (el.firstChild) frag.appendChild(el.firstChild);
+      cache.delete(applied.key);
+      cache.set(applied.key, frag); // 重新 set，维持 LRU 顺序
+      if (cache.size > DOM_CACHE_MAX) {
+        const oldest = cache.keys().next().value;
+        if (oldest !== undefined) cache.delete(oldest);
+      }
+    }
+    // 命中缓存：整块挪回（消费掉，切走时再存回），不再重注入 / 重渲染。
+    // 仅无查询时复用（缓存里存的都是无高亮正文）。
+    const cached = activeQuery == null ? cache.get(key) : undefined;
+    if (cached) {
+      cache.delete(key);
+      el.appendChild(cached);
+      restoredFromCacheRef.current = true;
+    } else {
+      el.innerHTML = html;
+      restoredFromCacheRef.current = false;
+    }
     appliedHtmlRef.current = { el, key };
     restoreScroll();
-  }, [activeRender, activeDoc, markScrollAnchor, restoreScroll]);
+  }, [activeRender, activeDoc, activeQuery, markScrollAnchor, restoreScroll]);
 
   // 工具型「文档」（如图谱）用保留路径 /__tools__/... 打开为 tab
   const isTool = !!activeDoc && activeDoc.startsWith('/__tools__/');
@@ -352,6 +383,12 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   useEffect(() => {
     const el = contentRef.current;
     if (!el || !activeRender) return;
+    // 命中 DOM 缓存整块挪回的正文，KaTeX/mermaid 与关键词高亮都已处理过：跳过二次渲染，
+    // 避免重复处理（否则 mermaid 会重画、关键词会被二次包裹）。
+    if (restoredFromCacheRef.current) {
+      restoredFromCacheRef.current = false;
+      return;
+    }
     let cancelled = false;
     const run = () => {
       if (cancelled) return;
@@ -470,6 +507,8 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
       // 编辑器自己的右键留给系统菜单（方便复制/粘贴草稿）
       const target = e.target as HTMLElement | null;
       if (target?.closest?.('.md-note-editor')) return;
+      // 顶部 frontmatter 折叠块不是正文块、没有笔记行号锚点：不弹「插入笔记」菜单。
+      if (target?.closest?.('.md-frontmatter')) return;
       e.preventDefault();
       closeActiveNoteEditor();
       setNoteMenu(resolveNoteContext(el, e));
@@ -640,51 +679,76 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
       >
         {isTool ? (
           <GraphView onOpen={(path, title) => openDoc(path, title)} />
-        ) : activeDoc ? (
-          <div
-            className="mx-auto flex w-full items-start px-6 py-6"
-            style={{ maxWidth: containerMax, gap: TOC_GAP }}
-          >
-            <div className="min-w-0 flex-1" style={{ maxWidth: mdMax }}>
-              {/* 正文 HTML 由上面的 useLayoutEffect 命令式注入（保存笔记走局部替换，不整篇重写） */}
-              <div ref={contentRef} className="md-content" onClick={onContentClick} />
-              {backlinks.length > 0 && (
-                <div className="mt-8 border-t pt-4">
-                  <h2 className="text-sm font-semibold">🔗 反向链接 ({backlinks.length})</h2>
-                  <ul className="mt-2 space-y-1 text-sm">
-                    {backlinks.map((b) => (
-                      <li key={b.path}>
-                        <button className="text-primary hover:underline" onClick={() => openDoc(b.path, b.title)}>
-                          {b.title || b.path}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {outlinks.length > 0 && (
-                <div className="mt-6">
-                  <h2 className="text-sm font-semibold">↗ 出链 ({outlinks.length})</h2>
-                  <ul className="mt-2 space-y-1 text-sm">
-                    {outlinks.map((n) => (
-                      <li key={n} className="text-muted-foreground">
-                        {n}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+        ) : (
+          <>
+            {/* 正文容器常驻不卸载：切到「没有打开文档」的 set 时也保留同一节点，
+                切回时才能整块复用缓存的已渲染 DOM（公式/图表不重画）。 */}
+            <div
+              className={cn('mx-auto flex w-full items-start px-6 py-6', !activeDoc && 'hidden')}
+              style={{ maxWidth: containerMax, gap: TOC_GAP }}
+            >
+              <div className="min-w-0 flex-1" style={{ maxWidth: mdMax }}>
+                {/* 正文 HTML 由上面的 useLayoutEffect 命令式注入（保存笔记走局部替换，不整篇重写） */}
+                <div ref={contentRef} className="md-content" onClick={onContentClick} />
+                {backlinks.length > 0 && (
+                  <div className="mt-8 border-t pt-4">
+                    <h2 className="text-sm font-semibold">🔗 反向链接 ({backlinks.length})</h2>
+                    <ul className="mt-2 space-y-1 text-sm">
+                      {backlinks.map((b) => (
+                        <li key={b.path}>
+                          <button className="text-primary hover:underline" onClick={() => openDoc(b.path, b.title)}>
+                            {b.title || b.path}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {outlinks.length > 0 && (
+                  <div className="mt-6">
+                    <h2 className="text-sm font-semibold">↗ 出链 ({outlinks.length})</h2>
+                    <ul className="mt-2 space-y-1 text-sm">
+                      {outlinks.map((o) => {
+                        // 目标解析复用正文里点 [[双链]] 的那套逻辑（lib/doc-links.ts），
+                        // 不在出链面板另立一套规则；悬空双链保持灰文本、不可点。
+                        const resolved = resolveWikilink(o.target, fileIndex);
+                        return (
+                          <li key={o.target}>
+                            {resolved ? (
+                              <button
+                                className="text-primary hover:underline"
+                                title={resolved.title || o.target}
+                                onClick={() => openDoc(resolved.path, resolved.title)}
+                              >
+                                {o.target}
+                              </button>
+                            ) : (
+                              <span className="text-muted-foreground" title="目标笔记不存在">
+                                {o.target}
+                              </span>
+                            )}
+                            {o.count > 1 && (
+                              <span className="ml-1.5 text-xs text-muted-foreground">×{o.count}</span>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+              </div>
+              {activeDoc && inlineToc && (
+                <aside className="sticky top-6 shrink-0 self-start" style={{ width: tocWidth }}>
+                  <TocPanel />
+                </aside>
               )}
             </div>
-            {inlineToc && (
-              <aside className="sticky top-6 shrink-0 self-start" style={{ width: tocWidth }}>
-                <TocPanel />
-              </aside>
+            {!activeDoc && (
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                选择文件查看
+              </div>
             )}
-          </div>
-        ) : (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            选择文件查看
-          </div>
+          </>
         )}
 
         {floatToc && (

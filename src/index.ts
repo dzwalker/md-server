@@ -150,9 +150,28 @@ app.get('/api/outlinks/*', async (req) => {
 
 app.get('/api/graph', async () => graph());
 
+// 允许经 /api/asset/* 内联返回的本地文件类型。除图片/PDF 外，还覆盖正文里常见的
+// 可点击资源：互动 HTML（如 learning-ad 的 Plotly 页）、CSV/JSON/文本、以及生成脚本源码。
+// 见 specs/raw-asset-links/spec.md（render.ts 会把相对资源链接改写到该端点）。
 const ASSET_MIME: Record<string, string> = {
+  // 页面 / 文本
+  '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8', '.log': 'text/plain; charset=utf-8',
+  '.csv': 'text/csv; charset=utf-8', '.tsv': 'text/tab-separated-values; charset=utf-8',
+  '.json': 'application/json; charset=utf-8', '.xml': 'application/xml; charset=utf-8',
+  '.yaml': 'text/plain; charset=utf-8', '.yml': 'text/plain; charset=utf-8',
+  '.toml': 'text/plain; charset=utf-8', '.ini': 'text/plain; charset=utf-8',
+  '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
+  // 源码（按纯文本返回，避免同源被当脚本执行）
+  '.py': 'text/plain; charset=utf-8', '.sh': 'text/plain; charset=utf-8',
+  '.ts': 'text/plain; charset=utf-8', '.tsx': 'text/plain; charset=utf-8', '.jsx': 'text/plain; charset=utf-8',
+  // 图片
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
-  '.svg': 'image/svg+xml', '.webp': 'image/webp', '.pdf': 'application/pdf',
+  '.svg': 'image/svg+xml', '.webp': 'image/webp', '.avif': 'image/avif', '.bmp': 'image/bmp', '.ico': 'image/x-icon',
+  // 文档 / 媒体 / 字体
+  '.pdf': 'application/pdf', '.mp4': 'video/mp4', '.webm': 'video/webm',
+  '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
+  '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf',
 };
 app.get('/api/asset/*', async (req, reply) => {
   const p = ((req.params as any)['*'] as string) || '';

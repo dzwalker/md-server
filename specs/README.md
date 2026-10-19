@@ -30,3 +30,6 @@ specs/<feature-slug>/
 - `notes/`：正文笔记（`> note: 内容` 一行）——右键插入 / 就地编辑 / 删除二次确认；服务里唯一会写 md 文件的接口，只改笔记行（2026-09-28）。
 - `toc-heading-render/`：右侧目录正确显示引号实体与 KaTeX 公式（`headings[].parts`），纯公式标题不再因空 id 从目录消失（2026-09-29）。
 - `notes-browse/`：笔记浏览——右侧目录内联笔记（挂在所属标题下一级、点击跳转高亮）+ 侧栏「笔记」面板（空间一级目录 → 有笔记的文件 → 每条笔记，可收起/搜索），`GET /api/notes`（2026-09-29）。
+- `set-scoped-tabs/`：已打开的文件跟随当前「空间 set」——切走时该 set 的 tab 整体关闭、切回时重新打开，按 set 分槽持久化（`md-open-tabs-by-set`），旧单键一次性迁移（2026-10-08）。
+- `raw-asset-links/`：正文里指向本地非 md 文件的相对链接（互动 HTML / PDF / CSV…）一点即开——服务端按文档目录改写为绝对 `/api/asset/*`，并扩充 `ASSET_MIME`（2026-10-12）。
+- `outlinks/`：出链面板去重 + 引用次数（`×N`）+ 点击跳转——`GET /api/outlinks/*` 响应从 `string[]` 改为 `{target,count}[]`，按正文首现排序；悬空双链灰显不可点（2026-10-19）。

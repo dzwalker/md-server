@@ -356,18 +356,68 @@ async function loadFile(path, query) {
       $('#content').appendChild(sec);
     }
   });
-  fetch('/api/outlinks' + path).then((r) => r.json()).then((ol) => {
-    const names = [...new Set(ol)];
-    if (names.length) {
-      const sec = document.createElement('div'); sec.className = 'backlinks';
-      const ul = document.createElement('ul');
-      for (const n of names) { const li = document.createElement('li'); li.textContent = n; ul.appendChild(li); }
-      const h = document.createElement('h2'); h.textContent = '↗ 出链 (' + names.length + ')';
-      sec.append(h, ul);
-      $('#content').appendChild(sec);
+  // 出链：服务端已按 target 去重并带 count（见 specs/outlinks/），这里负责解析目标 + 点击打开。
+  fetch('/api/outlinks' + path).then((r) => r.json()).then(async (ol) => {
+    if (!ol || !ol.length) return;
+    const files = await outlinkTargets();
+    const sec = document.createElement('div'); sec.className = 'backlinks';
+    const ul = document.createElement('ul');
+    for (const o of ol) {
+      const li = document.createElement('li');
+      const hit = findOutlinkTarget(o.target, files);
+      li.textContent = o.target;
+      if (hit) {
+        li.style.cursor = 'pointer'; li.style.color = 'var(--link)'; li.title = hit.title || hit.path;
+        li.onclick = () => loadFile(hit.path);
+      } else {
+        li.style.color = '#888'; li.title = '目标笔记不存在';
+      }
+      if (o.count > 1) {
+        const cnt = document.createElement('span');
+        cnt.textContent = ' ×' + o.count; cnt.style.color = '#888'; cnt.style.fontSize = '11px';
+        li.appendChild(cnt);
+      }
+      ul.appendChild(li);
     }
+    const h = document.createElement('h2'); h.textContent = '↗ 出链 (' + ol.length + ')';
+    sec.append(h, ul);
+    $('#content').appendChild(sec);
   });
 }
+
+// 出链目标解析：把 /api/tree 拍平成文件列表（规则与 web/ 的 resolveWikilink 一致：
+// 先按完整路径找，再按去掉扩展名的 basename 找，多个同名取路径最短的那个）。
+async function outlinkTargets() {
+  try {
+    const res = await fetch('/api/tree');
+    if (!res.ok) return [];
+    const flat = [];
+    const walk = (ns) => {
+      for (const n of ns || []) {
+        if (n.type === 'file') flat.push(n);
+        else if (n.children) walk(n.children);
+      }
+    };
+    walk(await res.json());
+    return flat;
+  } catch { return []; }
+}
+
+function findOutlinkTarget(target, files) {
+  const clean = String(target || '').trim();
+  if (!clean) return null;
+  const withMd = /\.(md|markdown)$/i.test(clean) ? clean : clean + '.md';
+  for (const c of ['/' + withMd, withMd]) {
+    const hit = files.find((f) => f.path === c);
+    if (hit) return hit;
+  }
+  const name = (clean.split('/').pop() || '').replace(/\.(md|markdown)$/i, '');
+  const matches = files.filter((f) => ((f.name || '').replace(/\.(md|markdown)$/i, '') === name));
+  if (!matches.length) return null;
+  matches.sort((a, b) => a.path.length - b.path.length);
+  return matches[0];
+}
+
 
 function highlightContent(query) {
   if (!query) return;

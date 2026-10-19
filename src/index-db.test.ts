@@ -209,3 +209,26 @@ describe('笔记清单 listNotes', () => {
     expect(listNotes({ dirs: ['nope'] })).toEqual([]);
   });
 });
+
+// 出链：`links` 表按出现次数存行，查询期按 target 聚合——同一目标只列一次（带次数），
+// 并按正文首次出现顺序返回；悬空双链（目标文档不存在）也保留。
+describe('出链 outlinks：去重 + 计数 + 正文顺序', () => {
+  it('同一目标合并计数，按正文首次出现排序；别名/锚点归一；悬空目标保留', () => {
+    fs.mkdirSync(path.join(tmpRoot, 't', 'out'), { recursive: true });
+    const p = path.join(tmpRoot, 't', 'out', 'hub.md');
+    fs.writeFileSync(p, '# Hub\n\n[[zeta]] [[b]] [[zeta]] [[b|别名]] [[c#sec]] [[b]]\n');
+    indexFiles([toMdFile(p)!]);
+
+    // zeta 在树里不存在（悬空），也照样出现在出链里。
+    expect(outlinks('/t/out/hub.md')).toEqual([
+      { target: 'zeta', count: 2 },
+      { target: 'b', count: 3 },
+      { target: 'c', count: 1 },
+    ]);
+  });
+
+  it('没有双链 / 未索引的文档都返回空数组', () => {
+    expect(outlinks('/t/b.md')).toEqual([]);
+    expect(outlinks('/t/never-indexed.md')).toEqual([]);
+  });
+});
