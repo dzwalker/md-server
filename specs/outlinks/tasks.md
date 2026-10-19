@@ -18,4 +18,4 @@
   - 解析到目标的条目可点，点击后 active tab 切到目标文档；
   - 悬空目标不可点、点击无副作用；
   - 无 console error / pageerror。
-- [ ] 10. 线上核对（经用户确认后 `docker compose up -d --build`）：bundle 哈希、`/api/outlinks` 新响应形状、真实文档面板条数与点击。
+- [x] 10. 线上核对（经用户确认后 `docker compose up -d --build`）：bundle 哈希、`/api/outlinks` 新响应形状、真实文档面板条数与点击。

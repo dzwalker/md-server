@@ -57,4 +57,5 @@
 - 2026-10-19 实现完成：`npx tsc --noEmit` 通过、`npm test` **88/88** 全绿、`web/ npm run build` 成功（bundle `index-COoF97Iu.js`）。
 - 本地 dev 实例（fixture 4 篇文档 + 独立 `MD_INDEX_DB`，:3098）Playwright + 本机 Chrome **DOM 断言 13/13 通过**：去重条数/计数/正文首现顺序、`×3` 徽标、可点按钮跳转、悬空双链灰文本不可点、切换文档后恢复、无 console error。
 - 旧版兜底前端（临时移走 `web/dist/index.html`）**7/7 断言通过**（去重/计数/可点/跳转）；其中 `/api/roots` 404 是旧版前端自身既有请求，与本次改动无关。
-- 待上线核对（需用户确认后 `docker compose up -d --build`）。
+- 2026-10-19 上线：commit `238b79f`（main，已 push）；`docker compose up -d --build` 镜像 `4dfee2139d9c`，容器 healthy（2724 files / 99 tags / 7 roots），线上 bundle `assets/index-COoF97Iu.js` 与本地 Playwright 验证过的产物哈希一致。
+- 线上核对（真实索引副本 + 真实 md 数据，独立实例 :3096）Playwright **8/8 通过**：`/learning-ad/concepts/transformer.md` 出链由 20 条重复 → **10 组**（`kalman-filter×5` 首项、`sensor-fusion×2` 悬空灰显不可点、其余可点并成功跳转），无 console error。
