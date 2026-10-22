@@ -90,4 +90,4 @@
 
 - 2026-10-22 实现：`src/index-db.ts` 新增 `stripCode()`（围栏/行内代码剔除）、收紧 `extractWikilinks` 正则、`migrateLinks()` + `links_clean_v1` 迁移；`src/index-db.test.ts` +3 例（代码块、未闭合围栏、嵌套/转义写法）。
 - 验证：`npx tsc --noEmit` 通过；`npm test` **91/91** 全绿；真实索引副本（迁移前 96 target / 约 15 个噪声）迁移后 **59 target**，仅剩 1 个「长得像双链」的正文文本（`ATTACH:...`）；真实数据 Playwright **5/5**（least-squares 出链 7 组、顺序正确、无假出链、无 console error）。
-- 上线：commit `8e6ac5d`，重启 md-server 容器（仅后端 `src` 改动，无前端/镜像变更）。线上核对：`links` 384 行 / 59 个 target（迁移前 96 个，约 15 个假双链），仅剩 `ATTACH:...` 一个「长得像双链」的正文文本；`module-1-least-squares` 出链接口返回 **7 组**，`backlinks('1000.')` 为空，2824→2832 files 为期间新增笔记所致、与本次迁移无关。
+- 上线：commit `8e6ac5d`，重启 md-server 容器（仅后端 `src` 改动，无前端/镜像变更）。线上核对：`links` 384 行 / 59 个 target（迁移前 96 个，约 15 个假双链），仅剩 `ATTACH:...` 一个「长得像双链」的正文文本；`module-1-least-squares` 出链接口返回 **7 组**，`backlinks('1000.')` 为空，2724→2832 files 为期间新增笔记所致、与本次迁移无关。
