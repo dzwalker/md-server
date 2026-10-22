@@ -59,3 +59,35 @@
 - 旧版兜底前端（临时移走 `web/dist/index.html`）**7/7 断言通过**（去重/计数/可点/跳转）；其中 `/api/roots` 404 是旧版前端自身既有请求，与本次改动无关。
 - 2026-10-19 上线：commit `238b79f`（main，已 push）；`docker compose up -d --build` 镜像 `4dfee2139d9c`，容器 healthy（2724 files / 99 tags / 7 roots），线上 bundle `assets/index-COoF97Iu.js` 与本地 Playwright 验证过的产物哈希一致。
 - 线上核对（真实索引副本 + 真实 md 数据，独立实例 :3096）Playwright **8/8 通过**：`/learning-ad/concepts/transformer.md` 出链由 20 条重复 → **10 组**（`kalman-filter×5` 首项、`sensor-fusion×2` 悬空灰显不可点、其余可点并成功跳转），无 console error。
+
+## 增量（2026-10-22）：排除代码里的「假双链」
+
+### 背景
+
+- 上线后发现 `/learning-ad/courses/c2-state-estimation-localization/notes/module-1-least-squares.md` 的出链里混进 `1000.` / `1e6` / `1.` / `R` / `y`：它们来自正文代码块里的 numpy 片段（`np.array([[1000.]])`、`np.array([[R]])`），被旧的双链正则当成了 `[[...]]`。
+- 同类噪声还有 shell `if [[ "$S" != "ERROR-ACTIVE" ]]`、`grep 'scene:\[[^]]+\]'`、行内代码里的示例 `[[概念名]]`、`np.array([[.05]])` 等：全库 96 个 target 里约 15 个是这类假双链，也污染 `backlinks` 与图谱。
+
+### 目标
+
+- 双链只在正文里提取：围栏代码块（```/~~~，含未闭合到文末）与行内代码（`...`）整体跳过。
+- 收紧语法：目标限单行、不以 `[` 开头（避开 `[[[文本]]](md 链接)` 嵌套），`\[\[...]]` 转义写法不算。
+- 老索引库一次性迁移：用 `files.body` 重算 `links`（不重扫磁盘、不改 md），迁移标记 `links_clean_v1`。
+
+### 非目标
+
+- 不处理正文里「长得像双链的普通文本」（如 `[[ATTACH:...]]`、C++ `[[no_discard]]`）——按语法仍算双链。
+- 不改 `render.ts` 的渲染；不影响正文里 `[[...]]` 的点击解析。
+- 不改 `graph` / `backlinks` 的接口形状（同一张 links 表，自然一起干净）。
+
+### 验收标准
+
+- [x] Given `np.array([[1000.]])`、`if [[ ... ]]`、行内代码 `[[x]]`，When 索引，Then 都不产生出链。
+- [x] Given `module-1-least-squares.md`，Then 出链 = 7 组（least-squares×5 / matrix-basics / kalman-filter×5 / sensor-fusion / lidar-icp / gnss-denied-localization×2 / bicycle-model），无 `1000.`/`1e6`/`1.`/`R`/`y`。
+- [x] Given 老索引库（含假双链），When 启动，Then 自动迁移，files/tags/fts 不受影响。
+- [x] Given 正文里的正常双链（含 `|别名`、`#锚点`），Then 仍正常计入出链/反链。
+
+### 交付记录
+
+- 2026-10-22 实现：`src/index-db.ts` 新增 `stripCode()`（围栏/行内代码剔除）、收紧 `extractWikilinks` 正则、`migrateLinks()` + `links_clean_v1` 迁移；`src/index-db.test.ts` +3 例（代码块、未闭合围栏、嵌套/转义写法）。
+- 验证：`npx tsc --noEmit` 通过；`npm test` **91/91** 全绿；真实索引副本（迁移前 96 target / 约 15 个噪声）迁移后 **59 target**，仅剩 1 个「长得像双链」的正文文本（`ATTACH:...`）；真实数据 Playwright **5/5**（least-squares 出链 7 组、顺序正确、无假出链、无 console error）。
+- 上线：重启 md-server 容器（仅后端 `src` 改动，无前端/镜像变更）。

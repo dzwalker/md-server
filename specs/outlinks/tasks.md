@@ -19,3 +19,11 @@
   - 悬空目标不可点、点击无副作用；
   - 无 console error / pageerror。
 - [x] 10. 线上核对（经用户确认后 `docker compose up -d --build`）：bundle 哈希、`/api/outlinks` 新响应形状、真实文档面板条数与点击。
+
+## 增量（2026-10-22）：排除代码里的假双链
+
+- [x] 11. RED：`src/index-db.test.ts` 增加代码块/行内代码/未闭合围栏/嵌套与转义 3 例。
+- [x] 12. GREEN：`extractWikilinks` 先 `stripCode()` 再扫；目标限单行、排除 `[` 开头与前导 `\`/`[`。
+- [x] 13. 老库迁移：`migrateLinks()` 用 `files.body` 重算 links，标记 `links_clean_v1`。
+- [x] 14. 验证：tsc + npm test + 真实索引副本迁移（96→59 target）+ 真实数据 Playwright 5/5。
+- [x] 15. 重启 md-server 容器上线并核对 least-squares 出链 7 组。

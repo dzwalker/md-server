@@ -42,6 +42,9 @@ function init() {
   if (!cols.includes('name')) db.exec('ALTER TABLE files ADD COLUMN name TEXT');
   // WAL 上限：checkpoint 后把 WAL 截断到 64MB，避免历史全量重建把 -wal 撑到 GB 级。
   try { db.pragma('journal_size_limit = 67108864'); } catch { /* ignore */ }
+  // 双链提取口径迁移：老库用 files.body 重算一次 links（见 migrateLinks 注释）。
+  // 失败不阻塞启动：DELETE 在事务里，回滚后旧数据仍在，下次启动再试。
+  try { migrateLinks(db); } catch { /* ignore */ }
   return db;
 }
 
@@ -50,6 +53,8 @@ function init() {
 const FTS_ROWID_KEY = 'fts_rowid_v2';
 // 上次索引同步完成时间：启动时据此只补「停机期间被改动的文件」，不再全量重建。
 const LAST_SYNC_KEY = 'last_sync_at';
+// 双链提取口径 v1：排除代码块 / 行内代码里的 `[[...]]`（numpy 数组、shell `[[ ]]` 等假双链）。
+const LINKS_CLEAN_KEY = 'links_clean_v1';
 
 function getMeta(d: any, key: string): string | null {
   const r = d.prepare('SELECT value FROM meta WHERE key=?').get(key) as { value?: string } | undefined;
@@ -58,6 +63,26 @@ function getMeta(d: any, key: string): string | null {
 
 function setMeta(d: any, key: string, value: string) {
   d.prepare('INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value);
+}
+
+/**
+ * 双链提取口径迁移（v1）：老库把代码里的 `[[...]]` 也当成了双链
+ * （numpy `np.array([[1000.]])`、shell `if [[ ... ]]`、行内代码里的示例 `[[...]]`）。
+ * 这里用 files 表里已存的正文重算全部 links —— 不重扫磁盘、不改任何 md 文件。
+ * 新库（files 为空）也会直接打上标记，之后由索引流程按新口径写入。
+ */
+function migrateLinks(d: any) {
+  if (getMeta(d, LINKS_CLEAN_KEY) === '1') return;
+  const rows = d.prepare('SELECT path, body FROM files').all() as { path: string; body: string }[];
+  const tx = d.transaction(() => {
+    d.prepare('DELETE FROM links').run();
+    const ins = d.prepare('INSERT INTO links(source,target) VALUES(?,?)');
+    for (const r of rows) {
+      for (const w of extractWikilinks(r.body || '')) ins.run(r.path, w);
+    }
+    setMeta(d, LINKS_CLEAN_KEY, '1');
+  });
+  tx();
 }
 
 function extractTags(fm: any): string[] {
@@ -348,11 +373,36 @@ export function searchFiles(q: string, opts: { tag?: string; dir?: string; limit
   return out;
 }
 
+/**
+ * 去掉代码区域，只留正文：围栏代码块（``` / ~~~，含缩进与未闭合到文末）整行剔除，
+ * 行内代码（`...`，可跨行）整段剔除。
+ * 目录里常把 numpy / shell 片段贴进笔记，`np.array([[1000.]])`、`if [[ ... ]]` 都会
+ * 命中双链正则，不清掉就会变成「假出链」（见 specs/outlinks/ 的补充记录）。
+ */
+function stripCode(body: string): string {
+  const kept: string[] = [];
+  let fence: string | null = null;
+  for (const line of body.split('\n')) {
+    const m = /^[ \t]{0,3}(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      // 闭合围栏：同字符且长度不短于开围栏；闭合行本身也不保留。
+      if (m && m[1][0] === fence[0] && m[1].length >= fence.length) fence = null;
+      continue;
+    }
+    if (m) { fence = m[1]; continue; }
+    kept.push(line);
+  }
+  return kept.join('\n').replace(/(`+)([\s\S]*?)\1/g, ' ');
+}
+
 function extractWikilinks(body: string): string[] {
-  const re = /\[\[([^\]]+)\]\]/g;
+  // 目标限单行、不以 `[` 开头，且前一个字符不能是 `[` / `\`：
+  // 避开 `[[[文本]]](markdown 链接)` 这类嵌套写法与 `\[\[...]]` 转义写法。
+  const re = /(?<![\\[])\[\[([^\[\]\n][^\]\n]*)\]\]/g;
   const out: string[] = [];
   let m;
-  while ((m = re.exec(body))) {
+  const prose = stripCode(body);
+  while ((m = re.exec(prose))) {
     const target = m[1].split('|')[0].split('#')[0].trim();
     if (target) out.push(target);
   }

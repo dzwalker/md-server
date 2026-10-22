@@ -232,3 +232,57 @@ describe('出链 outlinks：去重 + 计数 + 正文顺序', () => {
     expect(outlinks('/t/never-indexed.md')).toEqual([]);
   });
 });
+
+// 假双链：numpy/shell 代码里的 `[[...]]`（如 `np.array([[1000.]])`、`if [[ ... ]]`）
+// 以及行内代码里的示例 `[[...]]` 都不是真双链，提取时必须排除。
+describe('双边提取：只认正文，不认代码里的 [[...]]', () => {
+  it('围栏代码块 / 行内代码里的 [[...]] 不算双链', () => {
+    fs.mkdirSync(path.join(tmpRoot, 't', 'code'), { recursive: true });
+    const p = path.join(tmpRoot, 't', 'code', 'x.md');
+    fs.writeFileSync(
+      p,
+      [
+        '# Code',
+        '',
+        '正文 [[real-link]] 与 [[real-link|别名]]。',
+        '',
+        '```python',
+        'x = np.array([[1000.]])',
+        'P = np.array([[1e6]])',
+        'y = [[1e6]]',
+        '```',
+        '',
+        '行内代码 `[[not-a-link]]` 不算；shell 示例：',
+        '',
+        '```bash',
+        'if [[ "$S" != "ERROR-ACTIVE" ]]; then',
+        '```',
+        '',
+      ].join('\n'),
+    );
+    indexFiles([toMdFile(p)!]);
+
+    expect(outlinks('/t/code/x.md')).toEqual([{ target: 'real-link', count: 2 }]);
+  });
+
+  it('未闭合的围栏代码一直算到文末', () => {
+    fs.mkdirSync(path.join(tmpRoot, 't', 'code'), { recursive: true });
+    const p = path.join(tmpRoot, 't', 'code', 'y.md');
+    fs.writeFileSync(p, ['# Open', '', '正文 [[real]]', '', '```python', 'z = np.array([[42.]])', ''].join('\n'));
+    indexFiles([toMdFile(p)!]);
+
+    expect(outlinks('/t/code/y.md')).toEqual([{ target: 'real', count: 1 }]);
+  });
+
+  it('嵌套写法 [[[文本]]](链接) 与转义 \\[\\[...]] 都不算双链', () => {
+    fs.mkdirSync(path.join(tmpRoot, 't', 'code'), { recursive: true });
+    const p = path.join(tmpRoot, 't', 'code', 'z.md');
+    fs.writeFileSync(
+      p,
+      ['# Nested', '', '- 上游：[[[Module 2 硬件]]](../x.md)', '', '转义写法 \\[\\[escaped]] 不算。', '', '正文 [[real]] 算。', ''].join('\n'),
+    );
+    indexFiles([toMdFile(p)!]);
+
+    expect(outlinks('/t/code/z.md')).toEqual([{ target: 'real', count: 1 }]);
+  });
+});
