@@ -59,6 +59,10 @@ function cancelShow(): void {
 /** 悬浮意图延迟：停够 SHOW_DELAY_MS 才弹；期间移走会取消。 */
 function scheduleShow(anchor: HTMLElement, getPayload: () => GlossaryPayload | null | undefined): void {
   cancelShow();
+  // 关键：从正文其它元素快速移回术语时，之前排的 140ms 关闭计时会调用 hideGlossaryTip()，
+  // 而它会连带 cancelShow()，把刚排上的待弹任务取消掉 —— 表现为「动一下就永远不弹，
+  // 必须离开再进来且立刻停住」。这里先把待关闭取消，保证停在术语上就一定会弹。
+  cancelHide();
   showTimer = window.setTimeout(() => {
     showTimer = null;
     showTip(anchor, getPayload());
