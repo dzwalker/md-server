@@ -8,6 +8,7 @@ import { scanAll, buildTree, scanDirs, scanRoot, toMdFile, resolveUrlPath, fsPat
 import type { MdFile } from './scanner.js';
 import type { Root } from './config.js';
 import { renderMarkdown } from './render.js';
+import { glossaryForDoc, glossaryVersionForDoc } from './glossary.js';
 import { applyNoteToFile, NoteError, toNoteOpInput, type NoteOpInput } from './notes.js';
 import { rebuildIndex, syncIndex, removeIndexPrefixInBatches, searchFiles, listTags, indexStats, backlinks, outlinks, graph, listFavorites, setFavorite, removeFavorite, listTodos, listDueTasks, indexFiles, indexFilesInBatches, removeIndexPaths, removeIndexPrefix, listFileSummaries, listFilesMeta, getFileMeta, listRecentFiles, listNotes, truncateWal } from './index-db.js';
 import { startMcp } from './mcp.js';
@@ -67,20 +68,27 @@ app.get('/api/files/*', async (req, reply) => {
 });
 
 // 轻量文档状态：供前端判断「当前打开的文档是否真的变了」，避免 dataVersion 变化就重注入整篇正文。
+// glossaryVersion：该文档所在空间的术语表集合签名——术语表改动时即便文档 mtime 没变也要重渲染。
 app.get('/api/stat', async (req) => {
   const p = String((req.query as any)?.path || '');
-  if (!p) return { exists: false, path: p };
+  if (!p) return { exists: false, path: p, glossaryVersion: '' };
   const f = metaOf(p);
-  if (!f) return { exists: false, path: p };
-  return { exists: true, path: p, mtimeMs: f.mtimeMs, size: f.size };
+  if (!f) return { exists: false, path: p, glossaryVersion: '' };
+  return { exists: true, path: p, mtimeMs: f.mtimeMs, size: f.size, glossaryVersion: glossaryVersionForDoc(p) };
 });
 
 app.get('/api/render/*', async (req, reply) => {
   const p = '/' + ((req.params as any)['*'] as string);
   const f = metaOf(p);
   if (!f || !f.fsPath) return reply.code(404).send({ error: 'not found', path: p });
-  const { html, headings } = renderMarkdown(fs.readFileSync(f.fsPath, 'utf8'), f.dir);
-  return { ...f, html, headings };
+  // 术语表按「空间 set」作用域聚合（见 specs/glossary/spec.md）：同空间多个术语表合并生效。
+  const glossary = glossaryForDoc(f.urlPath);
+  const { html, headings, glossary: glossaryPayload, glossaryVersion } = renderMarkdown(
+    fs.readFileSync(f.fsPath, 'utf8'),
+    f.dir,
+    glossary,
+  );
+  return { ...f, html, headings, glossary: glossaryPayload, glossaryVersion };
 });
 
 // 笔记（`> note: 内容`）的插入 / 改写 / 删除。这是服务里**唯一**会写 md 文件的接口：

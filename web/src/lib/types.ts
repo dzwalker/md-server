@@ -70,6 +70,29 @@ export interface Heading {
   parts?: TocPart[];
 }
 
+/** 术语浮层里的一条定义（服务端已渲染成 HTML，见 specs/glossary/）。 */
+export interface GlossaryDef {
+  /** 来源术语表文件名。 */
+  source: string;
+  html: string;
+}
+
+/** 一个术语名（含别名）在本次渲染里的定义信息。 */
+export interface GlossaryTermInfo {
+  /** 主名称 + 别名（规范化去重）。 */
+  names: string[];
+  /** 前 3 条定义（超出部分只在 total 里体现）。 */
+  defs: GlossaryDef[];
+  /** 该名字被定义的总条数（去重后）。 */
+  total: number;
+}
+
+/** `/api/render` 附带的本篇命中术语定义。 */
+export interface GlossaryPayload {
+  version: string;
+  terms: Record<string, GlossaryTermInfo>;
+}
+
 export interface RenderResult {
   path: string;
   title: string;
@@ -77,6 +100,10 @@ export interface RenderResult {
   headings: Heading[];
   /** 磁盘 mtime：写笔记时用作乐观锁，避免覆盖别处的改动。 */
   mtimeMs?: number;
+  /** 术语表集合版本（无术语表时为空串）。 */
+  glossaryVersion?: string;
+  /** 仅本文档命中了术语时给出。 */
+  glossary?: GlossaryPayload | null;
   [key: string]: unknown;
 }
 

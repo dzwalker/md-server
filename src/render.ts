@@ -3,6 +3,7 @@ import cjkFriendly from 'markdown-it-cjk-friendly';
 import hljs from 'highlight.js';
 import path from 'node:path';
 import { NOTE_LINE_RE } from './notes.js';
+import { normalizeGlossaryName, type GlossaryIndex } from './glossary.js';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const anchorModule = require('markdown-it-anchor');
@@ -29,7 +30,21 @@ export interface TocHeading {
   /** 仅在标题里出现公式时给出：有序片段，前端据此在目录中渲染 KaTeX。 */
   parts?: TocPart[];
 }
-export interface RenderResult { html: string; headings: TocHeading[]; }
+/** 浮层里的一条术语定义（服务端已渲染成 HTML）。 */
+export interface GlossaryDefPayload { source: string; html: string; }
+/** 一个名字 → 主名称 / 别名 / 前 N 条定义（见 specs/glossary/spec.md）。 */
+export interface GlossaryTermPayload { names: string[]; defs: GlossaryDefPayload[]; total: number; }
+/** 本次渲染用到的术语定义（只带命中的名字，避免把整张表塞进每篇文档）。 */
+export interface GlossaryPayload { version: string; terms: Record<string, GlossaryTermPayload>; }
+
+export interface RenderResult {
+  html: string;
+  headings: TocHeading[];
+  /** 本文档命中的术语定义；没有命中时省略。 */
+  glossary?: GlossaryPayload;
+  /** 术语表集合版本（无术语表时为空串），前端轮询据此刷新已打开文档。 */
+  glossaryVersion?: string;
+}
 
 const md = MarkdownIt({
   html: true,
@@ -55,7 +70,9 @@ md.use(anchor, {
   // 这类标题既进不了目录也点不动。默认取词为空时兜底把公式源码算进去。
   getTokensText: (tokens: any[]) => {
     const text = tokens
-      .filter((t) => t.type === 'text' || t.type === 'code_inline')
+      // glossary_term 是术语表插件切出来的文本片段：标题的 anchor id 必须把它算进去，
+      // 否则 `# CLIP 是什么` 的 id 会退化成「是什么」，目录跳转就丢了前半句。
+      .filter((t) => t.type === 'text' || t.type === 'code_inline' || t.type === 'glossary_term')
       .map((t) => t.content)
       .join('');
     if (text.trim()) return text;
@@ -79,6 +96,7 @@ md.use(cjkFriendly);
 md.use(katexPlugin);
 md.use(wikilinkPlugin);
 md.use(notePlugin);
+md.use(glossaryPlugin);
 md.use(srcLinePlugin);
 
 /**
@@ -119,10 +137,106 @@ function notePlugin(md: MarkdownIt) {
       ` data-line-start="${md.utils.escapeHtml(t.attrGet('data-line-start') || '')}"` +
       ` data-line-end="${md.utils.escapeHtml(t.attrGet('data-line-end') || '')}">` +
       `<div class="md-note-label">笔记</div>` +
-      `<div class="md-note-body">${md.renderInline(raw, env)}</div>` +
+      `<div class="md-note-body">${renderNoteBody(md, raw, env)}</div>` +
       `</div>\n`
     );
   };
+}
+
+/**
+ * 术语表插件：把正文 / 标题 / 笔记卡片里命中的术语名包成
+ * `<span class="glossary-term" data-glossary="…">`，悬浮定义由前端读取
+ * 本次渲染响应里的 glossary payload（见 specs/glossary/spec.md）。
+ *
+ * 只处理 inline 的 text token：代码块（fence/code_block）与行内代码（code_inline）
+ * 本来就不是 text；链接文字按 link 深度跳过。真正决定「同起点长词优先」的是
+ * glossary.ts 里的 matcher（alternatives 按长度降序），这里只负责切分。
+ */
+function glossaryPlugin(md: MarkdownIt) {
+  md.core.ruler.after('inline', 'glossary_terms', (state: any) => {
+    const index = state.env?.glossary as GlossaryIndex | undefined;
+    if (!index || !index.names.size) return;
+    for (const block of state.tokens) {
+      if (block.type !== 'inline' || !block.children) continue;
+      wrapGlossaryChildren(state.Token, block.children, index);
+    }
+  });
+
+  md.renderer.rules.glossary_term = (tokens: any[], idx: number, _options: any, env: any) => {
+    const token = tokens[idx];
+    const key = token.attrGet('data-glossary') || '';
+    if (env && env.glossaryUsed instanceof Set) env.glossaryUsed.add(key);
+    return (
+      `<span class="glossary-term" data-glossary="${md.utils.escapeHtml(key)}">` +
+      `${md.utils.escapeHtml(token.content)}</span>`
+    );
+  };
+}
+
+/** 在 inline children 里切分 text token（链接文字与代码不参与）。 */
+function wrapGlossaryChildren(TokenCtor: any, children: any[], index: GlossaryIndex): void {
+  let linkDepth = 0;
+  for (let i = 0; i < children.length; i++) {
+    const token = children[i];
+    if (token.type === 'link_open') { linkDepth++; continue; }
+    if (token.type === 'link_close') { linkDepth = Math.max(0, linkDepth - 1); continue; }
+    if (linkDepth > 0) continue;
+    if (token.type !== 'text' || !token.content) continue;
+    const parts = splitGlossaryText(TokenCtor, token.content, index);
+    if (!parts) continue;
+    children.splice(i, 1, ...parts);
+    i += parts.length - 1;
+  }
+}
+
+/** 一段纯文本按术语切分成 text / glossary_term 序列；没有命中返回 null。 */
+function splitGlossaryText(TokenCtor: any, text: string, index: GlossaryIndex): any[] | null {
+  const matcher = index.matcher;
+  matcher.lastIndex = 0; // 共享的 g 正则：每个 text token 都从头扫
+  const out: any[] = [];
+  let last = 0;
+  let match: RegExpExecArray | null;
+  while ((match = matcher.exec(text)) !== null) {
+    const matched = match[0];
+    if (!matched) { matcher.lastIndex++; continue; } // 防御空匹配死循环
+    if (match.index > last) out.push(makeTextToken(TokenCtor, text.slice(last, match.index)));
+    const term = makeTextToken(TokenCtor, matched);
+    term.type = 'glossary_term';
+    term.attrSet('data-glossary', normalizeGlossaryName(matched));
+    out.push(term);
+    last = match.index + matched.length;
+  }
+  if (!last) return null;
+  if (last < text.length) out.push(makeTextToken(TokenCtor, text.slice(last)));
+  return out;
+}
+
+function makeTextToken(TokenCtor: any, content: string): any {
+  const token = new TokenCtor('text', '', 0);
+  token.content = content;
+  return token;
+}
+
+/** 笔记卡片（`> note:`）的正文渲染：复用同一套切分，让笔记里的术语也有下划线。 */
+function renderNoteBody(md: MarkdownIt, raw: string, env: any): string {
+  const index = (env && env.glossary) as GlossaryIndex | undefined;
+  if (!index || !index.names.size) return md.renderInline(raw, env);
+  const parsed = md.parseInline(raw, env) as any[];
+  const inline = parsed.find((token) => token.type === 'inline');
+  if (!inline || !inline.children) return md.renderInline(raw, env);
+  const TokenCtor = tokenCtor(md);
+  if (!TokenCtor) return md.renderInline(raw, env);
+  wrapGlossaryChildren(TokenCtor, inline.children, index);
+  return md.renderer.renderInline(inline.children, md.options, env);
+}
+
+// markdown-it 包入口没导出 Token 构造器；用一个最小 parse 取一次即可。
+let cachedTokenCtor: any = null;
+function tokenCtor(md: MarkdownIt): any {
+  if (cachedTokenCtor) return cachedTokenCtor;
+  cachedTokenCtor =
+    (md.parse('x', {}) as any[]).find((token) => token.type === 'inline')?.constructor || null;
+  return cachedTokenCtor;
 }
 
 /**
@@ -523,8 +637,17 @@ function headingContent(innerHtml: string): { text: string; parts?: TocPart[] } 
   return hasMath ? { text, parts } : { text };
 }
 
-export function renderMarkdown(content: string, baseDir = ''): RenderResult {
-  const rendered = md.render(content, { baseDir });
+/** 浮层里每个名字最多展示几条定义（同一名字被多处定义时的截断，见 specs/glossary）。 */
+const MAX_GLOSSARY_DEFS = 3;
+
+export function renderMarkdown(content: string, baseDir = '', glossary?: GlossaryIndex): RenderResult {
+  const env: Record<string, any> = { baseDir };
+  const useGlossary = !!(glossary && glossary.names.size);
+  if (useGlossary) {
+    env.glossary = glossary;
+    env.glossaryUsed = new Set<string>();
+  }
+  const rendered = md.render(content, env);
   const headings: TocHeading[] = [];
   let match: RegExpExecArray | null;
   while ((match = headingRegex.exec(rendered)) !== null) {
@@ -533,5 +656,23 @@ export function renderMarkdown(content: string, baseDir = ''): RenderResult {
     if (parts) heading.parts = parts;
     headings.push(heading);
   }
-  return { html: rendered, headings };
+
+  const result: RenderResult = { html: rendered, headings, glossaryVersion: glossary ? glossary.version : '' };
+  if (!useGlossary) return result;
+
+  // 只回传本文档真正命中的术语：定义可能很长，不能把整张术语表塞进每篇文档。
+  const used = env.glossaryUsed as Set<string>;
+  const terms: Record<string, GlossaryTermPayload> = {};
+  for (const key of used) {
+    const entry = glossary!.names.get(key);
+    if (!entry) continue;
+    const defs: GlossaryDefPayload[] = entry.defs.map((def) => ({
+      source: def.source,
+      // 定义用独立的空 env 渲染：否则定义正文里的术语会被再次标注，甚至递归。
+      html: md.render(def.raw, {}),
+    }));
+    terms[key] = { names: entry.names, defs: defs.slice(0, MAX_GLOSSARY_DEFS), total: defs.length };
+  }
+  if (Object.keys(terms).length) result.glossary = { version: glossary!.version, terms };
+  return result;
 }
