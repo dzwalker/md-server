@@ -215,7 +215,14 @@
   line-height: 1.6;
   overscroll-behavior: contain;
 }
-.glossary-tip.is-open { display: block; }
+.glossary-tip.is-open {
+  display: block;
+  animation: md-glossary-in 120ms ease-out;
+}
+@keyframes md-glossary-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: none; }
+}
 .glossary-tip-names { margin-bottom: 4px; font-weight: 600; }
 .glossary-tip-md > :first-child { margin-top: 0; }
 .glossary-tip-md > :last-child { margin-bottom: 0; }

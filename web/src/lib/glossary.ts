@@ -15,12 +15,16 @@ import type { GlossaryPayload, GlossaryTermInfo } from './types';
  * 不随正文替换重新绑定。
  */
 
+// 悬浮意图：鼠标在术语上停稳 ~350ms 才弹出（避免扫读时鼠标划过正文到处弹窗）；
+// 关闭用更短的 140ms，移开即收，不挡视线。点击/触屏立即弹出（明确意图不等）。
+const SHOW_DELAY_MS = 350;
 const HIDE_DELAY_MS = 140;
 const VIEWPORT_MARGIN = 8;
 const GAP = 6;
 
 let tipEl: HTMLElement | null = null;
 let hideTimer: number | null = null;
+let showTimer: number | null = null;
 
 function ensureTip(): HTMLElement {
   if (tipEl) return tipEl;
@@ -28,7 +32,10 @@ function ensureTip(): HTMLElement {
   el.className = 'glossary-tip';
   el.setAttribute('role', 'dialog');
   el.setAttribute('aria-label', '术语解释');
-  el.addEventListener('mouseenter', () => cancelHide());
+  el.addEventListener('mouseenter', () => {
+    cancelHide();
+    cancelShow();
+  });
   el.addEventListener('mouseleave', () => scheduleHide());
   document.body.appendChild(el);
   tipEl = el;
@@ -42,6 +49,22 @@ function cancelHide(): void {
   }
 }
 
+function cancelShow(): void {
+  if (showTimer !== null) {
+    window.clearTimeout(showTimer);
+    showTimer = null;
+  }
+}
+
+/** 悬浮意图延迟：停够 SHOW_DELAY_MS 才弹；期间移走会取消。 */
+function scheduleShow(anchor: HTMLElement, getPayload: () => GlossaryPayload | null | undefined): void {
+  cancelShow();
+  showTimer = window.setTimeout(() => {
+    showTimer = null;
+    showTip(anchor, getPayload());
+  }, SHOW_DELAY_MS);
+}
+
 function scheduleHide(): void {
   cancelHide();
   hideTimer = window.setTimeout(() => hideGlossaryTip(), HIDE_DELAY_MS);
@@ -50,6 +73,7 @@ function scheduleHide(): void {
 /** 关掉浮层（切文档、点空白等场景也公开给调用方）。 */
 export function hideGlossaryTip(): void {
   cancelHide();
+  cancelShow();
   if (!tipEl) return;
   tipEl.classList.remove('is-open');
   tipEl.replaceChildren();
@@ -117,6 +141,7 @@ function showTip(anchor: HTMLElement, payload: GlossaryPayload | null | undefine
   const info = key ? payload?.terms?.[key] : undefined;
   if (!info || !info.defs.length) return;
   cancelHide();
+  cancelShow();
   renderTip(info);
   positionTip(anchor);
 }
@@ -141,10 +166,17 @@ export function bindGlossaryTooltip(
     const target = event.target as HTMLElement | null;
     const term = termOf(target);
     if (term) {
-      showTip(term, getPayload());
+      // 悬浮不立刻弹：停稳 350ms 才出，扫读时鼠标划过不会满屏弹窗。
+      scheduleShow(term, getPayload);
       return;
     }
-    if (target && tipEl?.contains(target)) return; // 移到浮层上：保持
+    if (target && tipEl?.contains(target)) {
+      // 移到浮层上：保持，并取消「切到另一个词」的待弹计时。
+      cancelShow();
+      cancelHide();
+      return;
+    }
+    cancelShow();
     scheduleHide();
   };
 
@@ -152,6 +184,7 @@ export function bindGlossaryTooltip(
     // 触屏没有 hover：点术语也能打开浮层。
     const term = termOf(event.target);
     if (term) {
+      // 点击/触屏是明确意图：不等延迟，立即弹出。
       showTip(term, getPayload());
       return;
     }
@@ -159,7 +192,10 @@ export function bindGlossaryTooltip(
     hideGlossaryTip();
   };
 
-  const onLeave = () => scheduleHide();
+  const onLeave = () => {
+    cancelShow();
+    scheduleHide();
+  };
 
   const onScroll = (event: Event) => {
     const target = event.target as Node | null;
@@ -186,6 +222,6 @@ export function bindGlossaryTooltip(
     window.removeEventListener('scroll', onScroll, true);
     window.removeEventListener('resize', onResize);
     document.removeEventListener('keydown', onKey);
-    hideGlossaryTip();
+    hideGlossaryTip(); // 内部同时清掉 show/hide 计时器
   };
 }
