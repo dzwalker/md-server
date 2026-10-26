@@ -27,7 +27,8 @@
 
 ### 匹配与切分（render.ts）
 
-- 每个 alternative 用 `(?<![A-Za-z0-9_])` / `(?![A-Za-z0-9_])` 包裹——**仅当首/尾字符是 ASCII 字母数字下划线时**加，保证中文子串与「中文+英文边界」语义不变。
+- 每个 alternative 在**首/尾字符是 ASCII 字母/数字/下划线时**用 `\b` 包裹（JS 的 `\w` 就是 `[A-Za-z0-9_]`），保证中文子串与「中文+英文边界」语义不变。
+- 不要用 lookaround 包每个名字：`learning-ad` 空间聚合 881 个名字时，带 lookaround 的正则源码约 21KB，V8 会退化到慢路径（扫 20KB 正文 200ms+）；`\b` 版本同条件约 2ms。
 - core 规则 `after('inline')` 遍历每个 inline 块的 children：维护 link 深度，跳过 `link_open..link_close` 之间的文字；对 `text` token 用共享正则 `exec` 扫描，切成 `text` + `glossary_term` token（`attrSet('data-glossary', normalize(matched))`）。
 - `glossary_term` 渲染器：`<span class="glossary-term" data-glossary="key">原文</span>`（`escapeHtml`），并把 key 记入 `env.glossaryUsed`。
 - 笔记卡片：`md.parseInline(raw, env)` 后对同一 children 复用切分函数，再 `renderer.renderInline`；这样 `> note:` 内也生效。

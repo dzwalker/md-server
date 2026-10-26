@@ -192,6 +192,19 @@ describe('匹配：长词优先与英文全词边界', () => {
     expect(termsIn(renderMarkdown('语言模型', '', overlap).html)).toEqual([['语言', '语言']]);
   });
 
+  it('匹配器不使用 lookaround（名字多时会让 V8 退化到慢路径）', () => {
+    const big = makeIndex(
+      Array.from({ length: 900 }, (_, i) => ({
+        name: `TERM${i}`,
+        aliases: [],
+        definition: `第 ${i} 个术语`,
+        sourcePath: '/a/术语表.md',
+      })),
+    );
+    expect(big.matcher.source).not.toContain('(?<');
+    expect(big.matcher.source).not.toContain('(?!');
+  });
+
   it('大小写不敏感：命中文本保留原文大小写', () => {
     expect(termsIn(renderMarkdown('Clip 与 cLiP', '', index()).html)).toEqual([
       ['clip', 'Clip'],
