@@ -17,6 +17,7 @@ import { X, Star, ListTree, Layers, PanelLeftOpen, Download } from 'lucide-react
 import { useStore, type OpenDoc } from '@/state/store';
 import { api } from '@/lib/api';
 import { downloadDocByPath } from '@/lib/download';
+import { bindGlossaryTooltip } from '@/lib/glossary';
 import type { Backlink, NoteRequest, Outlink, RenderResult } from '@/lib/types';
 import { cn, stripMdExt } from '@/lib/utils';
 import { renderExtras, highlightContent } from '@/lib/markdown-extras';
@@ -324,6 +325,13 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   // mtime 变了才重新拉正文，避免 dataVersion 一变就重注入整篇（大文档会被重复解析几秒）。
   const renderRef = useRef<RenderResult | null>(activeRender);
   renderRef.current = activeRender;
+  // 术语浮层（见 specs/glossary/）：正文是命令式注入/局部替换的，监听绑在常驻容器上，
+  // 定义从当前渲染响应里取（重渲染后 renderRef 自动是新值）。
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    return bindGlossaryTooltip(el, () => renderRef.current?.glossary);
+  }, []);
   useEffect(() => {
     if (!activeDoc || activeDoc.startsWith('/__tools__/')) return;
     let alive = true;
@@ -332,7 +340,8 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
         const s = await api.stat(activeDoc);
         if (!alive || !s.exists) return;
         const cur = renderRef.current;
-        if (!cur || cur.mtimeMs === s.mtimeMs) return;
+        // 文档 mtime 或所在空间的术语表版本没变 → 不重渲染（术语表改动也要即时生效）。
+        if (!cur || (cur.mtimeMs === s.mtimeMs && cur.glossaryVersion === s.glossaryVersion)) return;
         const r = await api.render(activeDoc);
         if (alive) {
           // 外部改动触发的整篇重注入：同样保住当前滚动位置。

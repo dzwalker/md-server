@@ -32,6 +32,7 @@
 | `src/scanner.ts` | 扫描 md 文件 → `MdFile` 列表 + 目录树（只读 fs） |
 | `src/index-db.ts` | SQLite 索引与检索：全文/拼音/标签/双链/图谱/收藏/待办 |
 | `src/render.ts` | markdown → HTML 渲染（markdown-it 插件 + KaTeX 数学 + 笔记卡片/行号锚点） |
+| `src/glossary.ts` | 术语表：文件命名判定 / 解析 / 按空间 set 聚合 / 长词优先匹配器 / mtime 缓存与版本（见 `specs/glossary/`） |
 | `src/embed.ts` | 语义向量（HF transformers + sqlite） |
 | `src/notes.ts` | 正文笔记（`> note: 内容` 一行）的业务：笔记行识别、增/改/删、单文件原子落盘 + mtime 乐观锁（唯一会写 md 的模块） |
 | `src/mcp.ts` | MCP 工具服务（SSE） |

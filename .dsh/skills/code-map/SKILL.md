@@ -17,6 +17,7 @@ whenToUse: 需要理解或修改 md-server 结构时（web/ 前端 React 工程�
 | `index-db.ts` | SQLite 索引：全文/拼音检索、标签、双链/反链/图谱、收藏、待办/到期、最近更新 | `rebuildIndex`, `searchFiles`, `listTags`, `backlinks`, `outlinks`, `graph`, `listFavorites`, `setFavorite`, `removeFavorite`, `listTodos`, `listDueTasks`, `listFileSummaries`, `listFilesMeta`, `getFileMeta`, `listRecentFiles` |
 | `render.ts` | markdown-it 渲染（KaTeX / emoji / task / footnote / highlight + 笔记卡片 + 块级行号锚点） | `renderMarkdown` |
 | `notes.ts` | 正文笔记（`> note: 内容` 一行）：识别 / 增改删 / 原子落盘 / mtime 乐观锁（唯一写 md 的模块，见 `specs/notes/`） | `applyNoteToFile`, `applyNoteOp`, `toNoteOpInput`, `isNoteLine`, `NoteError` |
+| `glossary.ts` | 术语表：命名/解析/按空间 set 聚合/匹配器/版本（见 `specs/glossary/`） | `isGlossaryFileName`, `parseGlossaryMarkdown`, `buildGlossaryIndex`, `glossaryForDoc`, `glossaryVersionForDoc` |
 | `embed.ts` | 语义向量（HF transformers + sqlite） | `buildEmbeddings`, `embedFiles`, `deleteEmbeddings`, `semanticSearch`, `embeddingsStatus` |
 | `mcp.ts` | MCP 工具服务（SSE，端口 3002） | `startMcp` |
 | `index.ts` | 装配：HTTP 路由 + 文件 watcher 实时索引 + 启动 | 入口 |
@@ -36,11 +37,12 @@ whenToUse: 需要理解或修改 md-server 结构时（web/ 前端 React 工程�
 | 库 | `src/lib/api.ts`, `lib/types.ts` | HTTP API 封装与响应类型（新增接口同步这两处） |
 | 库 | `src/lib/download.ts`, `lib/clipboard.ts` | 下载 md 原文（`downloadDocByPath`，文档头与右键菜单共用）/ 复制到剪贴板（含非安全上下文降级） |
 | 库 | `src/lib/markdown-extras.ts`, `mermaid-*.ts`, `md-themes.ts` | 客户端二次渲染 katex/mermaid、导出、Markdown 主题 |
+| 库 | `src/lib/glossary.ts` | 术语浮层：事件委托、定位翻转、定义渲染（见 `specs/glossary/`） |
 | 库 | `src/lib/notes.ts` | 笔记右键定位（`resolveNoteContext`）+ 就地编辑器（`startInsertEditor` / `startNoteEditor` / `closeActiveNoteEditor`，命令式 DOM） |
 | 库 | `src/lib/note-patch.ts` | 保存笔记时只替换目标那张卡片（整篇 DOM 不动 → 公式/图表不闪），并重编号下方块行号（见 `specs/notes/plan.md` §7） |
 | 库 | `src/lib/scroll-anchor.ts` | 正文整篇重注入时的滚动位置保持（content-visibility 估值漂移的补偿，见 `specs/notes/plan.md` §5） |
 
-- 依赖 API：`/api/tree` `/api/files` `/api/files/*` `/api/render/*` `/api/stat` `/api/notes`（POST，唯一会写 md 的接口）`/api/search` `/api/search-semantic` `/api/recent` `/api/tags` `/api/backlinks/*` `/api/outlinks/*` `/api/graph` `/api/favorites` `/api/todos` `/api/sets` `/api/status` `/api/asset/*`
+- 依赖 API：`/api/tree` `/api/files` `/api/files/*` `/api/render/*`（含 `glossary`）`/api/stat`（含 `glossaryVersion`）`/api/notes`（POST，唯一会写 md 的接口）`/api/search` `/api/search-semantic` `/api/recent` `/api/tags` `/api/backlinks/*` `/api/outlinks/*` `/api/graph` `/api/favorites` `/api/todos` `/api/sets` `/api/status` `/api/asset/*`
 - 渲染库：按需加载 `/media/*`（katex / mermaid / highlight）
 
 ### 基础设施
