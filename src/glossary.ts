@@ -201,16 +201,19 @@ function escapeRegExp(text: string): string {
 /**
  * 一个名字的正则片段。
  *
- * 英文全词：仅当首/尾字符是 ASCII 字母/数字/下划线时才加 lookaround。
- * 中文（或中英混合以中文结尾）不加边界 —— 中文本来就是子串匹配，且
- * `CLIP模型` 后面跟 `2` 仍应命中整段（尾字符是中文，不要求右边界）。
+ * 英文全词：仅当首/尾字符是 ASCII 字母/数字/下划线时才加 `\b`（JS 的 \w 就是
+ * `[A-Za-z0-9_]`，语义与「前后不能是 ASCII 词字符」一致）。中文（或以中文结尾）
+ * 不加边界 —— 中文本来就是子串匹配，`CLIP模型` 后面跟 `2` 仍应命中整段。
+ *
+ * 不要用 lookbehind/lookahead：术语表到 881 个名字时，带 lookaround 的正则源码
+ * 超过 ~20KB 会让 V8 退化到慢路径（扫 20KB 正文 200ms+），而 `\b` 版本只要 2ms。
  */
 function namePattern(name: string): string {
   const chars = Array.from(name);
   const first = chars[0] || '';
   const last = chars[chars.length - 1] || '';
-  const pre = ASCII_WORD_RE.test(first) ? '(?<![A-Za-z0-9_])' : '';
-  const post = ASCII_WORD_RE.test(last) ? '(?![A-Za-z0-9_])' : '';
+  const pre = ASCII_WORD_RE.test(first) ? '\\b' : '';
+  const post = ASCII_WORD_RE.test(last) ? '\\b' : '';
   return pre + escapeRegExp(name) + post;
 }
 
@@ -303,20 +306,46 @@ interface GlossaryFileRef {
   mtimeMs: number;
 }
 
+interface GlossaryFileCandidate {
+  urlPath: string;
+  top: string;
+}
+
+// 全量文件清单（listFileSummaries）在 2800+ 篇文档时约 60ms（files 表每行带 body，扫表很贵）。
+// 但术语表文件集合只在索引增删改时变化，所以缓存起来，由 index.ts 的 bumpVersion 通知失效。
+let fileCandidatesCache: GlossaryFileCandidate[] | null = null;
+
+function glossaryFileCandidates(): GlossaryFileCandidate[] {
+  if (fileCandidatesCache) return fileCandidatesCache;
+  const out: GlossaryFileCandidate[] = [];
+  for (const summary of listFileSummaries()) {
+    if (!isGlossaryFileName(summary.name)) continue;
+    const top = summary.urlPath.split('/').filter(Boolean)[0] || '';
+    if (!top) continue;
+    out.push({ urlPath: summary.urlPath, top });
+  }
+  fileCandidatesCache = out;
+  return out;
+}
+
+/** 索引有增删改时清空术语表文件清单缓存（index.ts 的 bumpVersion 调用）。 */
+export function invalidateGlossaryFileCache(): void {
+  fileCandidatesCache = null;
+}
+
 function glossaryFilesFor(urlPath: string): { dirs: string[]; files: GlossaryFileRef[] } {
   const dirs = spaceDirsForPath(urlPath);
   if (!dirs.length) return { dirs, files: [] };
   const dirSet = new Set(dirs);
   const files: GlossaryFileRef[] = [];
-  for (const summary of listFileSummaries()) {
-    const top = summary.urlPath.split('/').filter(Boolean)[0] || '';
-    if (!dirSet.has(top) || !isGlossaryFileName(summary.name)) continue;
-    const fsPath = resolveUrlPath(summary.urlPath);
+  for (const candidate of glossaryFileCandidates()) {
+    if (!dirSet.has(candidate.top)) continue;
+    const fsPath = resolveUrlPath(candidate.urlPath);
     if (!fsPath) continue;
     try {
       const st = fs.statSync(fsPath);
       if (!st.isFile()) continue;
-      files.push({ urlPath: summary.urlPath, mtimeMs: st.mtimeMs });
+      files.push({ urlPath: candidate.urlPath, mtimeMs: st.mtimeMs });
     } catch {
       /* 文件刚被删/不可读：这次不生效 */
     }

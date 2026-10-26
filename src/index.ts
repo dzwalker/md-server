@@ -8,7 +8,7 @@ import { scanAll, buildTree, scanDirs, scanRoot, toMdFile, resolveUrlPath, fsPat
 import type { MdFile } from './scanner.js';
 import type { Root } from './config.js';
 import { renderMarkdown } from './render.js';
-import { glossaryForDoc, glossaryVersionForDoc } from './glossary.js';
+import { glossaryForDoc, glossaryVersionForDoc, invalidateGlossaryFileCache } from './glossary.js';
 import { applyNoteToFile, NoteError, toNoteOpInput, type NoteOpInput } from './notes.js';
 import { rebuildIndex, syncIndex, removeIndexPrefixInBatches, searchFiles, listTags, indexStats, backlinks, outlinks, graph, listFavorites, setFavorite, removeFavorite, listTodos, listDueTasks, indexFiles, indexFilesInBatches, removeIndexPaths, removeIndexPrefix, listFileSummaries, listFilesMeta, getFileMeta, listRecentFiles, listNotes, truncateWal } from './index-db.js';
 import { startMcp } from './mcp.js';
@@ -321,7 +321,11 @@ app.setNotFoundHandler((req, reply) => {
 
 // 数据版本号：每次重建索引后 +1，供前端轻量轮询判断是否需要刷新。
 let dataVersion = 0;
-function bumpVersion() { dataVersion++; }
+function bumpVersion() {
+  // 索引有增删改 → 术语表文件清单（含新增/删除的术语表）可能变了，缓存作废。
+  invalidateGlossaryFileCache();
+  dataVersion++;
+}
 
 // 启动时同步索引：通常只补停机期间改动的文件（毫秒级），首次/异常时才全量重建。
 try {
