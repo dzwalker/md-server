@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { WriteError, statMdFile, checkMtimeLock, writeFileAtomic } from './file-write.js';
 
 /**
  * 笔记行（`> note: 内容`）。
@@ -14,13 +15,16 @@ import fs from 'node:fs';
 /** 笔记行正则：行首最多 3 个空格（与 CommonMark blockquote 的缩进规则一致）。 */
 export const NOTE_LINE_RE = /^ {0,3}> ?note:[ \t]?(.*)$/i;
 
-/** HTTP 状态码携带的业务错误：路由把它翻译成响应码与 message。 */
-export class NoteError extends Error {
-  status: number;
+/**
+ * HTTP 状态码携带的业务错误：路由把它翻译成响应码与 message。
+ *
+ * 落盘层（`file-write.ts`）抛的是 `WriteError`，是本类的父类——路由统一按
+ * `instanceof WriteError` 兜住两者（笔记行错误与文件级错误）。
+ */
+export class NoteError extends WriteError {
   constructor(message: string, status = 400) {
-    super(message);
+    super(message, status);
     this.name = 'NoteError';
-    this.status = status;
   }
 }
 
@@ -196,35 +200,16 @@ export function applyNoteOp(content: string, input: NoteOpInput): { content: str
   throw new NoteError(`不支持的 op：${String(input.op)}`, 400);
 }
 
-/** 仅允许 md 文件被写。 */
-function assertWritable(fsPath: string) {
-  if (!/\.(md|markdown)$/i.test(fsPath)) throw new NoteError('只允许对 .md 文件写笔记', 400);
-  let st: fs.Stats;
-  try {
-    st = fs.statSync(fsPath);
-  } catch {
-    throw new NoteError('文件不存在', 404);
-  }
-  if (!st.isFile()) throw new NoteError('目标不是文件', 400);
-  return st;
-}
-
 /**
  * 落盘：读原文 → 改笔记行 → 临时文件 + rename 原子替换。
  * 只写这一条笔记涉及的行，其余内容逐字保持（含 CRLF、末尾换行）。
  *
- * **属主与权限必须显式搬过去**：临时文件是当前进程新建的，rename 会把它的
- * uid/gid/mode 一起变成新的文件身份。容器以 root 跑时，这里不做处理就会把
- * 用户 dev:dev 的 md 变成 root:root（用户那边的编辑器随即读写被拒）。
+ * 原子写、属主/权限保持与 mtime 乐观锁都在 `file-write.ts`（与整篇正文保存共用）。
  */
 export function applyNoteToFile(fsPath: string, input: NoteOpInput): NoteOpResult {
-  const before = assertWritable(fsPath);
+  const before = statMdFile(fsPath);
   // 客户端 mtime 只在显式传入时校验：并发编辑检测，避免覆盖别处的改动。
-  if (typeof input.expectMtimeMs === 'number' && input.expectMtimeMs > 0) {
-    if (Math.abs(before.mtimeMs - input.expectMtimeMs) > 0.5) {
-      throw new NoteError('文件已被外部修改，请刷新后再编辑', 409);
-    }
-  }
+  checkMtimeLock(before, input.expectMtimeMs);
 
   const raw = fs.readFileSync(fsPath, 'utf8');
   const { content: next, line } = applyNoteOp(raw, input);
@@ -233,42 +218,6 @@ export function applyNoteToFile(fsPath: string, input: NoteOpInput): NoteOpResul
     return { line, mtimeMs: st.mtimeMs, size: st.size };
   }
 
-  const tmp = `${fsPath}.mdnote-${process.pid}-${Date.now()}.tmp`;
-  try {
-    fs.writeFileSync(tmp, next, 'utf8');
-    // 新文件的属主默认是「当前进程」：与源文件不一致时必须显式改回去。
-    // 进程身份已经等于源文件属主时（普通用户自托管运行）不必、也无法 chown。
-    const sameOwner = currentUid() === before.uid && currentGid() === before.gid;
-    if (!sameOwner) {
-      try {
-        fs.chownSync(tmp, before.uid, before.gid);
-      } catch (e) {
-        throw new NoteError(
-          `无法保持文件属主（当前进程 ${currentUid()}:${currentGid()}，文件 ${before.uid}:${before.gid}）：` +
-            `${e instanceof Error ? e.message : String(e)}。拒绝写入以免把文件变成别的属主。`,
-          500,
-        );
-      }
-    }
-    fs.chmodSync(tmp, before.mode & 0o777);
-    fs.renameSync(tmp, fsPath);
-  } catch (e) {
-    try {
-      if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
-    } catch {
-      /* ignore */
-    }
-    if (e instanceof NoteError) throw e;
-    throw new NoteError(`写入失败：${e instanceof Error ? e.message : String(e)}`, 500);
-  }
-  const after = fs.statSync(fsPath);
+  const after = writeFileAtomic(fsPath, next, before, 'mdnote');
   return { line, mtimeMs: after.mtimeMs, size: after.size };
-}
-
-/** 当前进程的 uid/gid（Windows 上没有这两个 API，返回 -1 表示不参与属主比较）。 */
-function currentUid(): number {
-  return typeof process.getuid === 'function' ? process.getuid() : -1;
-}
-function currentGid(): number {
-  return typeof process.getgid === 'function' ? process.getgid() : -1;
 }

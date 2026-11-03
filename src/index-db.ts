@@ -558,6 +558,28 @@ export function removeFavorite(path: string) {
   return listFavorites();
 }
 
+/**
+ * 改名后迁移收藏记录。
+ *
+ * 收藏按 urlPath 存：文件改名后旧 path 再也命中不了，收藏会静默消失。
+ * 保留原始的 pinned / addedAt（改名不该改变收藏的时间序）。
+ */
+export function renameFavorite(oldPath: string, newPath: string) {
+  if (oldPath === newPath) return listFavorites();
+  const d = init();
+  const row = d.prepare('SELECT pinned, added_at FROM favorites WHERE path=?').get(oldPath) as
+    | { pinned: number; added_at: number }
+    | undefined;
+  if (!row) return listFavorites();
+  const tx = d.transaction(() => {
+    d.prepare('DELETE FROM favorites WHERE path=?').run(oldPath);
+    d.prepare('INSERT INTO favorites(path, pinned, added_at) VALUES(?,?,?) ON CONFLICT(path) DO UPDATE SET pinned=excluded.pinned')
+      .run(newPath, row.pinned, row.added_at);
+  });
+  tx();
+  return listFavorites();
+}
+
 // ---------- 待办 / 到期任务（供 n8n 到期提醒使用） ----------
 export function listTodos(root?: string) {
   const d = init();

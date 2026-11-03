@@ -561,3 +561,186 @@
 /* 隐藏横向滚动条（保留滚动能力，用于 tab 栏） */
 .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* ==== 正文编辑态：块编辑器（见 specs/doc-editing/）====
+   编辑区与渲染区共用同一套 --md-* 主题变量（都在 .md-theme-* 容器内）。
+   视觉原则：块本身不加边框（渲染态尽量与预览页一致），只有悬停/编辑中的块才浮出底
+   与左侧强调条；源码框用等宽字体 + 代码底色，与渲染内容一眼可分。 */
+.md-editor { color: var(--md-fg, var(--foreground)); }
+.md-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--md-muted, var(--muted-foreground));
+}
+.md-editor-hint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: none;
+}
+.md-editor-conflict {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  border: 1px solid color-mix(in srgb, #f59e0b 45%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, #f59e0b 12%, transparent);
+}
+.md-editor-blocks { display: flex; flex-direction: column; }
+.md-editor-gap { flex: none; }
+.md-block {
+  position: relative;
+  margin: 1px 0;
+  border-left: 2px solid transparent;
+  border-radius: 4px;
+  transition: background 0.1s ease, border-color 0.1s ease;
+}
+.md-block:hover {
+  background: color-mix(in srgb, var(--md-accent, #0969da) 5%, transparent);
+  border-left-color: color-mix(in srgb, var(--md-accent, #0969da) 45%, transparent);
+  cursor: text;
+}
+.md-block-editing {
+  margin: 6px 0;
+  padding: 4px 8px 8px;
+  background: color-mix(in srgb, var(--md-accent, #0969da) 4%, transparent);
+  border-left-color: var(--md-accent, #0969da);
+  cursor: default;
+}
+.md-block-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 16px;
+  margin-bottom: 2px;
+  user-select: none;
+}
+.md-block-label {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+  padding: 0 5px;
+  border-radius: 999px;
+  color: var(--md-muted, var(--muted-foreground));
+  background: color-mix(in srgb, var(--md-muted, var(--muted-foreground)) 14%, transparent);
+}
+.md-block-head-hint {
+  font-size: 10px;
+  color: var(--md-muted, var(--muted-foreground));
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+.md-block:hover .md-block-head-hint { opacity: 0.8; }
+.md-block-done {
+  margin-left: auto;
+  padding: 1px 8px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--md-fg, var(--foreground));
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.md-block-done:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
+.md-block-done:focus-visible { outline: 2px solid var(--md-accent, #0969da); outline-offset: 1px; }
+.md-block-source {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 34px;
+  margin: 0;
+  padding: 6px 9px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  tab-size: 2;
+  color: var(--md-fg, var(--foreground));
+  background: var(--md-code-bg, var(--muted));
+  border: 1px solid transparent;
+  border-radius: 7px;
+  outline: none;
+  resize: none;
+  overflow: hidden; /* 高度由 JS 自适应，不要默认滚动条 */
+  caret-color: var(--md-accent, #0969da);
+}
+.md-block-editing .md-block-source { border-color: color-mix(in srgb, var(--md-accent, #0969da) 40%, var(--border)); }
+.md-block-editing .md-block-source:focus {
+  border-color: var(--md-accent, #0969da);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--md-accent, #0969da) 16%, transparent);
+}
+.md-block-source::selection { background: color-mix(in srgb, var(--md-accent, #0969da) 22%, transparent); }
+.md-block-preview-wrap {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed color-mix(in srgb, var(--border) 75%, transparent);
+}
+.md-block-preview-label {
+  display: inline-block;
+  margin-bottom: 4px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--md-muted, var(--muted-foreground));
+  user-select: none;
+}
+.md-block-preview {
+  padding: 4px 8px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--md-accent, #0969da) 3%, transparent);
+}
+/* 预览区里的块不要 content-visibility 的估值高度：它每次输入都在变，估值会跳。 */
+.md-block-preview > * { content-visibility: visible; }
+.md-editor-source {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 60vh;
+  padding: 12px 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.75;
+  tab-size: 2;
+  color: var(--md-fg, var(--foreground));
+  background: var(--md-code-bg, var(--muted));
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 8px;
+  outline: none;
+  resize: vertical;
+}
+.md-editor-source:focus { border-color: var(--md-accent, #0969da); }
+.md-editor-saving {
+  position: sticky;
+  bottom: 12px;
+  display: inline-block;
+  margin-top: 10px;
+  padding: 3px 10px;
+  font-size: 11px;
+  color: var(--md-muted, var(--muted-foreground));
+  background: var(--md-bg, var(--background));
+  border-radius: 999px;
+  box-shadow: 0 1px 6px rgb(0 0 0 / 8%);
+}
+
+/* 空块（新建的空文档 / 空段落）：渲染态没有内容也要留出可点击的落点。 */
+.md-block-empty {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+}
+.md-block-placeholder {
+  font-size: 13px;
+  color: var(--md-muted, var(--muted-foreground));
+  opacity: 0.7;
+  user-select: none;
+}

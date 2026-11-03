@@ -161,6 +161,53 @@ export interface RawFile {
   [key: string]: unknown;
 }
 
+/** POST /api/docs：整篇保存正文（content 是编辑器里的全文源码，mtimeMs 是乐观锁）。 */
+export interface DocSaveRequest {
+  path: string;
+  content: string;
+  /** 进入编辑时看到的磁盘 mtime；不传 = 强制覆盖（冲突后用户明确选择「覆盖保存」）。 */
+  mtimeMs?: number;
+}
+
+export interface DocSaveResponse {
+  ok: boolean;
+  path: string;
+  mtimeMs: number;
+  size: number;
+}
+
+/** POST /api/docs/create：dir 是应用内目录 urlPath，name 是基名（可带 .md）。 */
+export interface DocCreateRequest {
+  dir: string;
+  name: string;
+}
+
+export interface DocCreateResponse extends DocSaveResponse {
+  title: string;
+}
+
+/** POST /api/docs/rename：只改基名（扩展名沿用原文件），引用不自动改写。 */
+export interface DocRenameRequest {
+  path: string;
+  name: string;
+}
+
+export interface DocRenameResponse {
+  ok: boolean;
+  oldPath: string;
+  path: string;
+  title: string;
+}
+
+/** POST /api/render-block：把一个块的源码按该文档的上下文渲染成 HTML（只读）。 */
+export interface RenderBlockResponse {
+  ok: boolean;
+  html: string;
+  headings: Heading[];
+  glossary?: GlossaryPayload | null;
+  glossaryVersion?: string;
+}
+
 export interface Backlink {
   path: string;
   title?: string;

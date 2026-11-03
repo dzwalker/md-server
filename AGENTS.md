@@ -34,7 +34,9 @@
 | `src/render.ts` | markdown → HTML 渲染（markdown-it 插件 + KaTeX 数学 + 笔记卡片/行号锚点） |
 | `src/glossary.ts` | 术语表：文件命名判定 / 解析 / 按空间 set 聚合 / 长词优先匹配器 / mtime 缓存与版本（见 `specs/glossary/`） |
 | `src/embed.ts` | 语义向量（HF transformers + sqlite） |
-| `src/notes.ts` | 正文笔记（`> note: 内容` 一行）的业务：笔记行识别、增/改/删、单文件原子落盘 + mtime 乐观锁（唯一会写 md 的模块） |
+| `src/notes.ts` | 正文笔记（`> note: 内容` 一行）的业务：笔记行识别、增/改/删 |
+| `src/file-write.ts` | 写 md 的唯一底座：只允许 .md、临时文件 + rename 原子替换、保持属主/属组/权限、mtime 乐观锁（`WriteError` / `statMdFile` / `checkMtimeLock` / `writeFileAtomic`） |
+| `src/docs.ts` | 正文文档的文件级操作：整篇保存 / 新建 / 改名 + 文件名校验（`saveDocFile` / `createDocFile` / `renameDocFile` / `validateDocBaseName`，见 `specs/doc-editing/`） |
 | `src/mcp.ts` | MCP 工具服务（SSE） |
 | `src/index.ts` | HTTP 路由 + 文件 watcher 实时索引 + 启动装配 |
 
@@ -45,7 +47,10 @@
 1. 改完必须跑 `npx tsc --noEmit`；`npm test` 全绿才能交付。
 2. 引入 lint/格式工具后，不通过者不得提交。
 3. API 或 MCP 工具签名变更，必须同步 `AGENTS.md` / `README.md` 与相关 spec。
-4. 生产数据文件（`/data` 下 md 文件、`roots.json` 之外的多空间内容）只读，不擅自增删改。**唯一例外**：正文笔记接口（`POST /api/notes` → `src/notes.ts`）可以写 md，但能力被硬约束在「笔记行」（`> note: 内容`）的插入/改写/删除——不提供通用覆盖写，绝不改其它行，且必须带 `mtimeMs` 乐观锁；扩展这个例外需要先征求确认（见 `specs/notes/`）。写用户文件时必须**保持原属主/属组/权限位**（容器以 root 跑，临时文件 + rename 会换掉属主，`notes.ts` 里已显式 chown/chmod，新增写路径照此办理）。
+4. 生产数据文件（`/data` 下 md 文件、`roots.json` 之外的多空间内容）只读，不擅自增删改。**例外只有两条**（都是用户明确要的产品能力）：
+   - **笔记行**（`POST /api/notes` → `src/notes.ts`）：能力被硬约束在「笔记行」（`> note: 内容`）的插入/改写/删除——不提供通用覆盖写，绝不改其它行（见 `specs/notes/`）。
+   - **正文文档**（`POST /api/docs` / `/api/docs/create` / `/api/docs/rename` → `src/docs.ts`）：整篇保存正文、新建空文档、同目录改名（见 `specs/doc-editing/`）。整篇保存必须带 `mtimeMs` 乐观锁（对不上返回 409，前端让用户显式选择「覆盖保存」才允许省略）；新建/改名只允许落在已有文档空间内、只允许 `.md`、目标已存在一律拒绝（不静默覆盖）。
+   - 扩展这个例外需要先征求确认。写用户文件时必须**保持原属主/属组/权限位**（容器以 root 跑，临时文件 + rename 会换掉属主，`src/file-write.ts` 里已显式 chown/chmod，所有写路径必须走它）。
 5. 危险操作（见下）必须先停下来征求确认。
 
 ## 完成定义（DoD）

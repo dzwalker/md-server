@@ -1,17 +1,31 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Tree, type NodeApi, type NodeRendererProps, type TreeApi } from 'react-arborist';
-import { ChevronRight, ClipboardCopy, Copy, Download, FileText, Folder, FolderOpen, Network } from 'lucide-react';
+import {
+  ChevronRight,
+  ClipboardCopy,
+  Copy,
+  Download,
+  FilePlus,
+  FileText,
+  Folder,
+  FolderOpen,
+  Network,
+  PenLine,
+} from 'lucide-react';
 import type { TreeNode } from '@/lib/types';
+import { api } from '@/lib/api';
 import { useStore } from '@/state/store';
 import { useElementSize } from '@/hooks/use-element-size';
 import { cn, stripMdExt } from '@/lib/utils';
 import { copyText } from '@/lib/clipboard';
 import { downloadDocByPath } from '@/lib/download';
 import { Button } from '@/components/ui/button';
+import { DocNameDialog } from '@/components/doc-name-dialog';
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 
@@ -29,8 +43,11 @@ const TOOLS_NODE: TreeNode = {
 // 所以提示不能挂在菜单里，这里用 context 下发给每个节点行，由 TreeView 顶层渲染。
 const ToastContext = createContext<(msg: string) => void>(() => {});
 
+// 右键菜单弹出的命名对话框：新建（目录）或重命名（文件），同一时刻每行最多一个。
+type NameDialog = { kind: 'create' } | { kind: 'rename'; refs: number | null };
+
 function TreeNodeRow({ node, style }: NodeRendererProps<TreeNode>) {
-  const { openDoc, showFilename, activeDoc } = useStore();
+  const { openDoc, showFilename, activeDoc, createDoc, renameDoc } = useStore();
   const toast = useContext(ToastContext);
   const d = node.data;
   const isDir = d.type === 'dir';
@@ -41,6 +58,13 @@ function TreeNodeRow({ node, style }: NodeRendererProps<TreeNode>) {
   const isActive = !isDir && d.path === activeDoc;
   const Icon = isDir ? (node.isOpen ? FolderOpen : Folder) : isTool ? Network : FileText;
   const label = isDir ? d.name : isTool ? (d.title || d.name) : showFilename ? stripMdExt(d.name) : (d.title || d.name);
+
+  // 命名对话框必须用受控 state：ContextMenuItem 的 onSelect 会让菜单立刻卸载，
+  // 不能在菜单项里塞 DialogTrigger。
+  const [dialog, setDialog] = useState<NameDialog | null>(null);
+  // 菜单关闭时 Radix 会延迟把焦点还给触发元素，会和对话框输入框的自动聚焦打架；
+  // 选中「新建 / 重命名」时打个标记，让下面的 onCloseAutoFocus 跳过这次归还。
+  const dialogOpeningRef = useRef(false);
 
   // 「复制文件名」给的是磁盘上的真实文件名（带 .md 扩展名），不是树上显示的文档标题。
   async function onCopyName() {
@@ -61,6 +85,16 @@ function TreeNodeRow({ node, style }: NodeRendererProps<TreeNode>) {
       console.warn('下载失败：', err);
       toast('下载失败');
     }
+  }
+
+  // 打开改名对话框，顺手取「有几篇文档引用了它」用于提醒；拿不到就不提示。
+  function onRename() {
+    dialogOpeningRef.current = true;
+    setDialog({ kind: 'rename', refs: null });
+    api
+      .backlinks(d.path)
+      .then((bs) => setDialog((cur) => (cur?.kind === 'rename' ? { ...cur, refs: bs.length } : cur)))
+      .catch(() => {});
   }
 
   const row = (
@@ -96,9 +130,28 @@ function TreeNodeRow({ node, style }: NodeRendererProps<TreeNode>) {
       {isVirtual ? (
         row
       ) : (
-        <ContextMenu>
+        <ContextMenu onOpenChange={(o) => { if (o) dialogOpeningRef.current = false; }}>
           <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-          <ContextMenuContent className="min-w-44">
+          <ContextMenuContent
+            className="min-w-44"
+            onCloseAutoFocus={(e) => {
+              if (dialogOpeningRef.current) {
+                dialogOpeningRef.current = false;
+                e.preventDefault();
+              }
+            }}
+          >
+            {isDir && (
+              <ContextMenuItem
+                onSelect={() => {
+                  dialogOpeningRef.current = true;
+                  setDialog({ kind: 'create' });
+                }}
+              >
+                <FilePlus />
+                新建 Markdown 文件
+              </ContextMenuItem>
+            )}
             {isFile && (
               <ContextMenuItem onSelect={onCopyName}>
                 <Copy />
@@ -115,8 +168,54 @@ function TreeNodeRow({ node, style }: NodeRendererProps<TreeNode>) {
                 下载
               </ContextMenuItem>
             )}
+            {isFile && (
+              <>
+                <ContextMenuSeparator />
+                <ContextMenuItem onSelect={onRename}>
+                  <PenLine />
+                  重命名
+                </ContextMenuItem>
+              </>
+            )}
           </ContextMenuContent>
         </ContextMenu>
+      )}
+      {/* 新建 / 改名对话框：每个节点行各渲染一个，Portal 定位不受行布局影响。 */}
+      {dialog?.kind === 'create' && (
+        <DocNameDialog
+          open
+          onOpenChange={(o) => {
+            if (!o) setDialog(null);
+          }}
+          title="新建 Markdown 文件"
+          description={`在「${d.name}」下创建一个空文档，创建后直接进入编辑态。`}
+          confirmText="创建"
+          onSubmit={async (name) => {
+            await createDoc(d.path, name);
+            toast(`已创建：${name}`);
+          }}
+        />
+      )}
+      {dialog?.kind === 'rename' && (
+        <DocNameDialog
+          open
+          onOpenChange={(o) => {
+            if (!o) setDialog(null);
+          }}
+          title="重命名"
+          description={`当前文件名：${d.name}`}
+          initialName={stripMdExt(d.name)}
+          confirmText="重命名"
+          hint={
+            dialog.refs !== null && dialog.refs > 0
+              ? `有 ${dialog.refs} 篇文档引用了它（[[双链]] / 相对链接），改名后引用不会自动更新`
+              : undefined
+          }
+          onSubmit={async (name) => {
+            await renameDoc(d.path, name);
+            toast('已重命名');
+          }}
+        />
       )}
     </div>
   );

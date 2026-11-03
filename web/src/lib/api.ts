@@ -1,5 +1,11 @@
 import type {
   Backlink,
+  DocCreateRequest,
+  DocCreateResponse,
+  DocRenameRequest,
+  DocRenameResponse,
+  DocSaveRequest,
+  DocSaveResponse,
   Favorite,
   GraphData,
   NoteRequest,
@@ -8,6 +14,7 @@ import type {
   Outlink,
   RawFile,
   RecentFile,
+  RenderBlockResponse,
   RenderResult,
   SearchResult,
   SemanticResult,
@@ -100,8 +107,15 @@ export const api = {
   },
   // 笔记（`> note: 内容`）的插入 / 改写 / 删除：服务里唯一会写 md 文件的接口。
   saveNote: (req: NoteRequest) => post<NoteResponse>('/api/notes', req),
-  // 原始文件内容（后端 /api/files/* 读磁盘原文），用于「下载 md 文件」。
+  // 原始文件内容（后端 /api/files/* 读磁盘原文），用于「下载 md 文件」与进入编辑态取全文。
   rawFile: (path: string) => get<RawFile>(`/api/files${path}`),
+  // 正文编辑：整篇保存 / 新建 / 改名（见 specs/doc-editing/）。
+  saveDoc: (req: DocSaveRequest) => post<DocSaveResponse>('/api/docs', req),
+  createDoc: (req: DocCreateRequest) => post<DocCreateResponse>('/api/docs/create', req),
+  renameDoc: (req: DocRenameRequest) => post<DocRenameResponse>('/api/docs/rename', req),
+  // 块级实时预览（只读）：把一块源码按该文档的目录/术语表上下文渲染成 HTML。
+  renderBlock: (path: string, markdown: string) =>
+    post<RenderBlockResponse>('/api/render-block', { path, markdown }),
   stat: (path: string) =>
     get<{ exists: boolean; path: string; mtimeMs?: number; size?: number; glossaryVersion?: string }>(
       `/api/stat?path=${encodeURIComponent(path)}`,
