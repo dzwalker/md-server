@@ -13,7 +13,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { X, Star, ListTree, Layers, PanelLeftOpen, Download } from 'lucide-react';
+import { X, Star, ListTree, Layers, PanelLeftOpen, Download, Pencil } from 'lucide-react';
 import { useStore, type OpenDoc } from '@/state/store';
 import { api } from '@/lib/api';
 import { downloadDocByPath } from '@/lib/download';
@@ -54,6 +54,7 @@ import {
 } from '@/components/ui/dialog';
 import { useElementSize } from '@/hooks/use-element-size';
 import { GraphView } from './graph-view';
+import { DocEditor, type DocEditorHandle } from './doc-editor';
 import { TocPanel } from './toc-panel';
 import {
   MD_MAX_WIDTH,
@@ -66,6 +67,8 @@ interface TabProps {
   doc: OpenDoc;
   active: boolean;
   showFilename: boolean;
+  /** 这篇文档正在编辑且未保存：tab 上点一个小圆点。 */
+  dirty?: boolean;
   onActivate: () => void;
   onClose: () => void;
 }
@@ -73,7 +76,7 @@ interface TabProps {
 // 已渲染正文的 DOM 缓存上限（按文档篇数，LRU 淘汰），避免长时间浏览把内存撑大。
 const DOM_CACHE_MAX = 12;
 
-function SortableTab({ doc, active, showFilename, onActivate, onClose }: TabProps) {
+function SortableTab({ doc, active, showFilename, dirty, onActivate, onClose }: TabProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: doc.path,
   });
@@ -96,6 +99,7 @@ function SortableTab({ doc, active, showFilename, onActivate, onClose }: TabProp
         isDragging && 'z-10 opacity-60',
       )}
     >
+      {dirty && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" title="有未保存的修改" />}
       <span className="max-w-40 truncate" onClick={onActivate}>
         {label}
       </span>
@@ -138,6 +142,11 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     fileIndex,
     scrollTarget,
     clearScrollTarget,
+    editingPath,
+    editingDirty,
+    beginEdit,
+    endEdit,
+    setEditingDirty,
   } = useStore();
 
   const contentRef = useRef<HTMLDivElement>(null);
@@ -159,6 +168,10 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const noticeTimerRef = useRef<number | null>(null);
+  // 正文编辑态（见 specs/doc-editing/）：草稿全文在 DocEditor 内部，这里只管保存/取消与守卫。
+  const editorRef = useRef<DocEditorHandle | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const editing = !!activeDoc && editingPath === activeDoc;
 
   // 正文整篇重注入时的滚动锚点：长文档里 content-visibility 的「记忆尺寸」会随替换丢失，
   // 不做补偿的话保存笔记后可视位置会漂移（见 lib/scroll-anchor.ts）。
@@ -333,7 +346,7 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     return bindGlossaryTooltip(el, () => renderRef.current?.glossary);
   }, []);
   useEffect(() => {
-    if (!activeDoc || activeDoc.startsWith('/__tools__/')) return;
+    if (!activeDoc || activeDoc.startsWith('/__tools__/') || editing) return;
     let alive = true;
     const check = async () => {
       try {
@@ -357,7 +370,7 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
       alive = false;
       window.clearInterval(id);
     };
-  }, [activeDoc, cacheRender, markScrollAnchor]);
+  }, [activeDoc, cacheRender, markScrollAnchor, editing]);
 
   useEffect(() => {
     if (!activeDoc || activeDoc.startsWith('/__tools__/')) {
@@ -467,6 +480,84 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     }
   }
 
+  // ===== 正文编辑态（见 specs/doc-editing/）=====
+
+  // 保存：DocEditor 持有全文草稿；成功后由 onEditorSaved 退出编辑态并重渲染这篇文档。
+  const onSaveEditor = useCallback(async () => {
+    const h = editorRef.current;
+    if (!h || savingEdit) return;
+    setSavingEdit(true);
+    try {
+      await h.save();
+    } catch {
+      // 失败原因（含 409 冲突条）由编辑器自己展示，这里只避免未处理的 rejection。
+    } finally {
+      setSavingEdit(false);
+    }
+  }, [savingEdit]);
+
+  const onCancelEditor = useCallback(() => {
+    const h = editorRef.current;
+    if (h?.isDirty() && !window.confirm('有未保存的修改，确定放弃？')) return;
+    endEdit();
+  }, [endEdit]);
+
+  const onEditorSaved = useCallback(async () => {
+    const p = editingPath;
+    endEdit();
+    if (!p) return;
+    try {
+      // 重新拉一次服务端渲染：正文/目录/反链都跟着更新，且与磁盘内容一致。
+      const r = await api.render(p);
+      appliedHtmlRef.current = null;
+      cacheRender(p, r);
+    } catch {
+      /* ignore */
+    }
+  }, [editingPath, endEdit, cacheRender]);
+
+  // 编辑态快捷键：⌘S 保存、Esc 取消（文本框里的 Esc 交给块编辑器收起草稿）。
+  useEffect(() => {
+    if (!editing) return;
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const inField = !!target?.closest?.('textarea, input');
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        void onSaveEditor();
+        return;
+      }
+      if (e.key === 'Escape' && !inField) {
+        e.preventDefault();
+        onCancelEditor();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editing, onSaveEditor, onCancelEditor]);
+
+  // 有未保存改动时关页面/刷新要拦一下（浏览器原生确认框）。
+  useEffect(() => {
+    if (!editingDirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [editingDirty]);
+
+  // 进入编辑态前先收掉正文里可能的笔记编辑器（两套编辑模型不要同时在页面上）。
+  useEffect(() => {
+    if (editing) closeActiveNoteEditor();
+  }, [editing]);
+
+  // 编辑态永远只属于当前文档：万一 activeDoc 被别处切走（未触发守卫的路径），
+  // 编辑器自动退出，避免草稿挂在一个看不见的文档上。
+  useEffect(() => {
+    if (editingPath && activeDoc && editingPath !== activeDoc) endEdit();
+  }, [activeDoc, editingPath, endEdit]);
+
   // ===== 笔记（`> note: 内容` 一行；见 specs/notes/）=====
 
   function showNotice(msg: string) {
@@ -511,7 +602,7 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   // 正文右键：已存在的笔记 → 「编辑 / 删除」；其它位置 → 只有「插入笔记」。
   useEffect(() => {
     const el = contentRef.current;
-    if (!el || !activeDoc || isTool) return;
+    if (!el || !activeDoc || isTool || editing) return;
     const onContextMenu = (e: globalThis.MouseEvent) => {
       // 编辑器自己的右键留给系统菜单（方便复制/粘贴草稿）
       const target = e.target as HTMLElement | null;
@@ -524,7 +615,7 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     };
     el.addEventListener('contextmenu', onContextMenu);
     return () => el.removeEventListener('contextmenu', onContextMenu);
-  }, [activeDoc, activeRender, isTool]);
+  }, [activeDoc, activeRender, isTool, editing]);
 
   // 切文档 / 卸载时收掉就地编辑器与菜单，避免残留状态。
   useEffect(() => {
@@ -623,6 +714,7 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
                   doc={d}
                   active={d.path === activeDoc}
                   showFilename={showFilename}
+                  dirty={editing && d.path === activeDoc && editingDirty}
                   onActivate={() => activateDoc(d.path)}
                   onClose={() => closeDoc(d.path)}
                 />
@@ -634,8 +726,17 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
 
       <div className="flex shrink-0 items-center gap-1.5 px-5 pb-2 pt-3">
         <span className="min-w-0 flex-1 truncate text-base font-semibold">{title}</span>
-        {activeDoc && !isTool && (
+        {activeDoc && !isTool && !editing && (
           <>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground"
+              onClick={() => beginEdit(activeDoc)}
+              title="编辑（进入编辑状态）"
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
             <Button
               variant="ghost"
               size="icon"
@@ -654,6 +755,29 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
               title="下载 Markdown 文件"
             >
               <Download className="h-4 w-4" />
+            </Button>
+          </>
+        )}
+        {editing && (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8"
+              onClick={onCancelEditor}
+              disabled={savingEdit}
+              title="取消编辑（不写入文件）"
+            >
+              取消
+            </Button>
+            <Button
+              size="sm"
+              className="h-8"
+              onClick={() => void onSaveEditor()}
+              disabled={savingEdit}
+              title="保存到磁盘（⌘S）"
+            >
+              {savingEdit ? '保存中…' : '保存'}
             </Button>
           </>
         )}
@@ -693,7 +817,10 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
             {/* 正文容器常驻不卸载：切到「没有打开文档」的 set 时也保留同一节点，
                 切回时才能整块复用缓存的已渲染 DOM（公式/图表不重画）。 */}
             <div
-              className={cn('mx-auto flex w-full items-start px-6 py-6', !activeDoc && 'hidden')}
+              className={cn(
+                'mx-auto flex w-full items-start px-6 py-6',
+                (!activeDoc || editing) && 'hidden',
+              )}
               style={{ maxWidth: containerMax, gap: TOC_GAP }}
             >
               <div className="min-w-0 flex-1" style={{ maxWidth: mdMax }}>
@@ -752,6 +879,19 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
                 </aside>
               )}
             </div>
+            {/* 正文编辑态：块编辑器替代渲染区（渲染区只是 display:none，DOM 缓存与滚动容器都保留）。 */}
+            {editing && activeDoc && (
+              <div className="mx-auto w-full" style={{ maxWidth: mdMax }}>
+                <DocEditor
+                  key={activeDoc}
+                  ref={editorRef}
+                  path={activeDoc}
+                  onSaved={() => void onEditorSaved()}
+                  onDirtyChange={setEditingDirty}
+                  onError={(msg) => showNotice(msg)}
+                />
+              </div>
+            )}
             {!activeDoc && (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                 选择文件查看
@@ -760,7 +900,7 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
           </>
         )}
 
-        {floatToc && (
+        {floatToc && !editing && (
           <div className="absolute right-4 top-4 z-20" style={{ width: tocWidth }}>
             <div className="shadow-lg">
               <TocPanel />

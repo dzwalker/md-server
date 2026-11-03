@@ -233,3 +233,25 @@ describe('正文本地资源链接改写', () => {
     expect(html).not.toContain('/api/asset');
   });
 });
+
+// 块编辑器按 data-line-* 把正文切成可编辑块（见 specs/doc-editing/）：
+// 围栏代码块 / mermaid 的 token 属性会被 markdown-it 的 fence 规则丢掉（highlight 返回 <pre>），
+// 这里守住「代码块也有行号锚点」，否则它们只能退化成源码块、拿不到语法高亮。
+describe('围栏代码块的行号锚点', () => {
+  it('带语言高亮的围栏也有 data-line-start / data-line-end', () => {
+    const { html } = renderMarkdown('正文\n\n```js\nconst a = 1;\n```\n\n结尾');
+    expect(html).toMatch(/<pre[^>]*data-line-start="3"[^>]*data-line-end="5"/);
+    expect(html).toMatch(/<pre[^>]*class="hljs"/);
+  });
+
+  it('mermaid 围栏同样带锚点', () => {
+    const { html } = renderMarkdown('```mermaid\ngraph TD\n  A-->B\n```');
+    expect(html).toMatch(/<pre[^>]*data-line-start="1"[^>]*data-line-end="4"/);
+    expect(html).toMatch(/<pre[^>]*class="mermaid-src"/);
+  });
+
+  it('四空格缩进代码块也带锚点', () => {
+    const { html } = renderMarkdown('    x = 1');
+    expect(html).toMatch(/data-line-start="1" data-line-end="1"/);
+  });
+});

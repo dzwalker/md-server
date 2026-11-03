@@ -9,8 +9,10 @@ import type { MdFile } from './scanner.js';
 import type { Root } from './config.js';
 import { renderMarkdown } from './render.js';
 import { glossaryForDoc, glossaryVersionForDoc, invalidateGlossaryFileCache } from './glossary.js';
-import { applyNoteToFile, NoteError, toNoteOpInput, type NoteOpInput } from './notes.js';
-import { rebuildIndex, syncIndex, removeIndexPrefixInBatches, searchFiles, listTags, indexStats, backlinks, outlinks, graph, listFavorites, setFavorite, removeFavorite, listTodos, listDueTasks, indexFiles, indexFilesInBatches, removeIndexPaths, removeIndexPrefix, listFileSummaries, listFilesMeta, getFileMeta, listRecentFiles, listNotes, truncateWal } from './index-db.js';
+import { applyNoteToFile, toNoteOpInput, type NoteOpInput } from './notes.js';
+import { saveDocFile, createDocFile, renameDocFile, validateDocBaseName, docFileName } from './docs.js';
+import { WriteError } from './file-write.js';
+import { rebuildIndex, syncIndex, removeIndexPrefixInBatches, searchFiles, listTags, indexStats, backlinks, outlinks, graph, listFavorites, setFavorite, removeFavorite, renameFavorite, listTodos, listDueTasks, indexFiles, indexFilesInBatches, removeIndexPaths, removeIndexPrefix, listFileSummaries, listFilesMeta, getFileMeta, listRecentFiles, listNotes, truncateWal } from './index-db.js';
 import { startMcp } from './mcp.js';
 import { buildEmbeddings, embedFiles, deleteEmbeddings, deleteEmbeddingsByPrefix, semanticSearch, embeddingsStatus } from './embed.js';
 import { createRequire } from 'node:module';
@@ -91,9 +93,8 @@ app.get('/api/render/*', async (req, reply) => {
   return { ...f, html, headings, glossary: glossaryPayload, glossaryVersion };
 });
 
-// 笔记（`> note: 内容`）的插入 / 改写 / 删除。这是服务里**唯一**会写 md 文件的接口：
-// 业务全部在 notes.ts（只改目标笔记行，其余逐字保持），这里只做参数解析与错误码映射。
-// 详见 specs/notes/spec.md。
+// 笔记（`> note: 内容`）的插入 / 改写 / 删除。业务全部在 notes.ts（只改目标笔记行，
+// 其余逐字保持），这里只做参数解析与错误码映射。详见 specs/notes/spec.md。
 app.post('/api/notes', async (req, reply) => {
   const body = (req.body || {}) as NoteOpInput;
   const p = String(body?.path || '');
@@ -109,9 +110,112 @@ app.post('/api/notes', async (req, reply) => {
     bumpVersion();
     return { ok: true, path: p, line: r.line, mtimeMs: r.mtimeMs, size: r.size };
   } catch (e) {
-    if (e instanceof NoteError) return reply.code(e.status).send({ error: e.message });
+    if (e instanceof WriteError) return reply.code(e.status).send({ error: e.message });
     throw e;
   }
+});
+
+// ---------- 正文文档：整篇保存 / 新建 / 改名（见 specs/doc-editing/） ----------
+// 写 md 文件的能力集中在三处业务模块：`notes.ts`（只改笔记行）、`docs.ts`（整篇正文 /
+// 新建 / 改名）、`file-write.ts`（原子写 + 属主/权限保持 + mtime 乐观锁）。
+
+/** 写盘后的收尾：重新入索引 + （开启向量检索的空间）增量向量 + 数据版本 +1。 */
+function afterWrite(fsPath: string) {
+  const f = toMdFile(fsPath);
+  if (f) {
+    indexFiles([f]);
+    if (isEmbedEnabled(f.urlPath)) void embedFiles([f]).catch(() => {});
+  }
+  bumpVersion();
+  return f;
+}
+
+// 整篇保存：content 是编辑器里的全文源码，没改的行由前端逐字带回。
+// mtimeMs 是进入编辑时看到的磁盘 mtime（乐观锁，对不上 → 409，绝不覆盖别处的改动）。
+app.post('/api/docs', async (req, reply) => {
+  const b = (req.body || {}) as { path?: string; content?: string; mtimeMs?: number };
+  const p = String(b.path || '');
+  const fsPath = p ? resolveUrlPath(p) : null;
+  if (!fsPath) return reply.code(400).send({ error: '非法或缺失的文档路径 path' });
+  try {
+    const r = saveDocFile(fsPath, String(b.content ?? ''), b.mtimeMs);
+    afterWrite(fsPath);
+    return { ok: true, path: p, mtimeMs: r.mtimeMs, size: r.size };
+  } catch (e) {
+    if (e instanceof WriteError) return reply.code(e.status).send({ error: e.message });
+    throw e;
+  }
+});
+
+// 新建空文档：dir 是应用内目录 urlPath（如 /personal/notes），name 是基名（可带 .md）。
+app.post('/api/docs/create', async (req, reply) => {
+  const b = (req.body || {}) as { dir?: string; name?: string };
+  const dir = String(b.dir || '').replace(/\/+$/, '');
+  try {
+    if (!dir) throw new WriteError('缺少目标目录 dir', 400);
+    // 基名校验在 docs.ts 里收口（拒 / \ .. 保留字符 等），拼出来的 urlPath 不可能越出目录。
+    const fileName = docFileName(validateDocBaseName(b.name));
+    const p = dir + '/' + fileName;
+    const fsPath = resolveUrlPath(p);
+    if (!fsPath) throw new WriteError('目标目录不在任何文档空间内', 400);
+    const r = createDocFile(fsPath);
+    const f = afterWrite(fsPath);
+    return { ok: true, path: p, mtimeMs: r.mtimeMs, size: r.size, title: f?.title || fileName };
+  } catch (e) {
+    if (e instanceof WriteError) return reply.code(e.status).send({ error: e.message });
+    throw e;
+  }
+});
+
+// 改名：只允许同目录换基名（扩展名沿用原文件）。引用（[[双链]] / 相对链接）不自动改写，
+// 前端在确认框里提示「有几篇文档引用了它」。收藏记录随文件迁移（index-db.renameFavorite）。
+app.post('/api/docs/rename', async (req, reply) => {
+  const b = (req.body || {}) as { path?: string; name?: string };
+  const p = String(b.path || '');
+  const fsPath = p ? resolveUrlPath(p) : null;
+  if (!fsPath) return reply.code(400).send({ error: '非法或缺失的文档路径 path' });
+  try {
+    const base = validateDocBaseName(b.name);
+    const ext = path.posix.extname(p) || '.md';
+    const newPath = path.posix.dirname(p) + '/' + docFileName(base, ext);
+    const newFsPath = resolveUrlPath(newPath);
+    if (!newFsPath) throw new WriteError('目标路径不在任何文档空间内', 400);
+    renameDocFile(fsPath, newFsPath);
+    if (newPath !== p) {
+      removeIndexPaths([p]);
+      deleteEmbeddings([p]);
+      renameFavorite(p, newPath);
+      afterWrite(newFsPath);
+    }
+    const f = getFileMeta(newPath);
+    return { ok: true, oldPath: p, path: newPath, title: f?.title || docFileName(base, ext) };
+  } catch (e) {
+    if (e instanceof WriteError) return reply.code(e.status).send({ error: e.message });
+    throw e;
+  }
+});
+
+// 实时预览：把编辑器里的**一个块**的源码渲染成 HTML（按该文档的目录与术语表上下文）。
+// 只读：不碰磁盘、不改索引。前端在块编辑时防抖调用（见 specs/doc-editing/plan.md）。
+const MAX_BLOCK_SRC = 200 * 1024;
+app.post('/api/render-block', async (req, reply) => {
+  const b = (req.body || {}) as { path?: string; markdown?: string };
+  const p = String(b.path || '');
+  if (!p) return reply.code(400).send({ error: '缺少文档路径 path' });
+  const fsPath = resolveUrlPath(p);
+  if (!fsPath) return reply.code(400).send({ error: '非法的文档路径 path' });
+  const markdown = String(b.markdown ?? '');
+  if (markdown.length > MAX_BLOCK_SRC) return reply.code(413).send({ error: '片段过大' });
+  const f = metaOf(p);
+  const dir = f?.dir ?? path.posix.dirname(p);
+  const r = renderMarkdown(markdown, dir, glossaryForDoc(p));
+  return {
+    ok: true,
+    html: r.html,
+    headings: r.headings,
+    glossary: r.glossary ?? null,
+    glossaryVersion: r.glossaryVersion ?? '',
+  };
 });
 
 // 笔记清单（只读）：侧栏「笔记」面板按当前空间目录汇总 `> note:` 行，dirs 口径同 /api/recent。

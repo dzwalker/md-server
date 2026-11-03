@@ -100,6 +100,23 @@ md.use(glossaryPlugin);
 md.use(srcLinePlugin);
 
 /**
+ * 围栏代码块的原始行号锚点。
+ *
+ * markdown-it 的 fence 规则有个特例：`options.highlight` 返回以 `<pre` 开头的字符串时，
+ * 它把这段字符串**原样返回，token 上的属性全部丢掉**（`fence` 的 renderer 直接 return）。
+ * 本项目的块编辑器与正文右键笔记都靠 `data-line-*` 定位，所以这里把锚点补回第一个 `<pre>`。
+ * mermaid 围栏（`<pre class="mermaid-src">`）走的是同一个规则，一并修好。
+ */
+const defaultFenceRenderer = (md as any).renderer.rules.fence;
+(md as any).renderer.rules.fence = (tokens: any[], idx: number, options: any, env: any, self: any) => {
+  const out: string = defaultFenceRenderer(tokens, idx, options, env, self);
+  const start = tokens[idx].attrGet('data-line-start');
+  const end = tokens[idx].attrGet('data-line-end');
+  if (!start || !end || !out.startsWith('<pre')) return out;
+  return out.replace(/^<pre/, `<pre data-line-start="${start}" data-line-end="${end}"`);
+};
+
+/**
  * 笔记行（`> note: 内容`）→ 笔记卡片（见 specs/notes/spec.md）。
  *
  * 必须排在 blockquote 之前，否则这一行会先被当成普通引用块吃掉。

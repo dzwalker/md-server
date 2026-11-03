@@ -30,6 +30,7 @@ type DocsAction =
   | { type: 'activate'; path: string }
   | { type: 'close'; path: string }
   | { type: 'reorder'; from: number; to: number }
+  | { type: 'rename'; from: string; to: string; title: string }
   | { type: 'hydrate'; docs: DocsState };
 
 function docsReducer(state: DocsState, action: DocsAction): DocsState {
@@ -59,6 +60,17 @@ function docsReducer(state: DocsState, action: DocsAction): DocsState {
       const [moved] = openDocs.splice(action.from, 1);
       openDocs.splice(action.to, 0, moved);
       return { ...state, openDocs };
+    }
+    case 'rename': {
+      // 改名后 tab 要跟着换路径（否则点开的是已经不存在的旧路径）。
+      const openDocs = state.openDocs.map((d) =>
+        d.path === action.from ? { path: action.to, title: action.title } : d,
+      );
+      return {
+        ...state,
+        openDocs,
+        activeDoc: state.activeDoc === action.from ? action.to : state.activeDoc,
+      };
     }
     case 'hydrate':
       // 切换空间 set 时整体换入目标 set 的已打开文档（无记录即空 → 全部关闭）。
@@ -118,6 +130,17 @@ interface StoreValue {
   registerTocControl: (c: TocControl | null) => void;
   tocExpandTo: (n: number) => void;
   tocOpenAll: () => void;
+  /** 正在编辑的文档路径（同一时刻最多一篇；null = 预览态）。 */
+  editingPath: string | null;
+  /** 编辑态是否有未保存改动（用于切文档/切空间/关页面时的确认）。 */
+  editingDirty: boolean;
+  beginEdit: (path: string) => void;
+  endEdit: () => void;
+  setEditingDirty: (v: boolean) => void;
+  /** 新建空文档并直接进入编辑态（资源管理器右键菜单用）。 */
+  createDoc: (dir: string, name: string) => Promise<{ path: string; title: string }>;
+  /** 改名（同目录换基名），打开的 tab / 渲染缓存跟着迁移。 */
+  renameDoc: (path: string, name: string) => Promise<{ path: string; title: string }>;
 }
 
 const StoreContext = createContext<StoreValue | null>(null);
@@ -313,7 +336,50 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     void refreshFavorites();
   }, [refreshFavorites]);
 
+  // ---------- 正文编辑态（见 specs/doc-editing/）----------
+  // 同一时刻最多一篇在编辑：草稿全文由编辑器组件自己持有（每次按键都写进 store 会让
+  // 整棵树跟着重渲染），store 只记「谁在编辑 + 有没有未保存改动」，供离开动作做确认。
+  const [editingPath, setEditingPath] = useState<string | null>(null);
+  const [editingDirty, setEditingDirtyState] = useState(false);
+  const editingPathRef = useRef<string | null>(null);
+  const editingDirtyRef = useRef(false);
+  const setEditingDirty = useCallback((v: boolean) => {
+    editingDirtyRef.current = v;
+    setEditingDirtyState(v);
+  }, []);
+  const beginEdit = useCallback((path: string) => {
+    if (!path || path.startsWith('/__tools__/')) return;
+    editingPathRef.current = path;
+    setEditingPath(path);
+    setEditingDirty(false);
+  }, [setEditingDirty]);
+  const endEdit = useCallback(() => {
+    editingPathRef.current = null;
+    setEditingPath(null);
+    setEditingDirty(false);
+  }, [setEditingDirty]);
+  /**
+   * 离开当前文档前确认：没有改动就静默退出编辑态；有改动必须用户点头（v1 用系统确认框，
+   * 避免把「确认丢弃」的弹层逻辑散到每个离开入口）。
+   */
+  const confirmLeaveEdit = useCallback(
+    (nextPath?: string | null): boolean => {
+      const cur = editingPathRef.current;
+      if (!cur) return true;
+      if (nextPath === cur) return true;
+      if (!editingDirtyRef.current) {
+        endEdit();
+        return true;
+      }
+      const ok = window.confirm('当前文档有未保存的修改，确定放弃这些修改？');
+      if (ok) endEdit();
+      return ok;
+    },
+    [endEdit],
+  );
+
   const openDoc = useCallback((path: string, title?: string, query?: string | null, anchor?: string) => {
+    if (!confirmLeaveEdit(path)) return;
     dispatch({
       type: 'open',
       path,
@@ -321,15 +387,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       query: query ?? null,
     });
     setScrollTarget(anchor ? { path, anchor } : null);
-  }, []);
+  }, [confirmLeaveEdit]);
 
   const activateDoc = useCallback((path: string) => {
+    if (!confirmLeaveEdit(path)) return;
     dispatch({ type: 'activate', path });
     setScrollTarget(null);
-  }, []);
+  }, [confirmLeaveEdit]);
 
   const clearScrollTarget = useCallback(() => setScrollTarget(null), []);
-  const closeDoc = useCallback((path: string) => dispatch({ type: 'close', path }), []);
+  const closeDoc = useCallback((path: string) => {
+    // 关的正是正在编辑的那篇（或它所在的 set 被切走）时，先确认未保存改动。
+    if (path === editingPathRef.current && !confirmLeaveEdit(null)) return;
+    dispatch({ type: 'close', path });
+  }, [confirmLeaveEdit]);
   const reorderDocs = useCallback(
     (from: number, to: number) => dispatch({ type: 'reorder', from, to }),
     [],
@@ -370,6 +441,46 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   );
 
   const refreshData = useCallback(() => setDataVersion((v) => v + 1), []);
+
+  // 新建空文档 → 刷新目录树 → 打开并直接进入编辑态。
+  const createDoc = useCallback(
+    async (dir: string, name: string) => {
+      // 先在本地确认未保存改动：否则会出现「文件已建好但没打开」的半截状态。
+      if (!confirmLeaveEdit(null)) throw new Error('当前文档有未保存的修改，已取消新建');
+      const r = await api.createDoc({ dir, name });
+      await refreshTree();
+      openDoc(r.path, r.title);
+      beginEdit(r.path);
+      refreshData();
+      return { path: r.path, title: r.title };
+    },
+    [confirmLeaveEdit, refreshTree, openDoc, beginEdit, refreshData],
+  );
+
+  // 改名（同目录换基名）：tabs、渲染缓存、收藏都跟着迁移；引用不自动改写。
+  const renameDoc = useCallback(
+    async (target: string, name: string) => {
+      if (editingPathRef.current === target) {
+        throw new Error('正在编辑该文档，请先保存或取消后再改名');
+      }
+      const r = await api.renameDoc({ path: target, name });
+      dispatch({ type: 'rename', from: target, to: r.path, title: r.title });
+      setRenderCache((cur) => {
+        const prev = cur[target];
+        if (!prev) return cur;
+        const next = { ...cur };
+        delete next[target];
+        next[r.path] = { ...prev, path: r.path, title: r.title };
+        return next;
+      });
+      setScrollTarget((cur) => (cur && cur.path === target ? null : cur));
+      await refreshTree();
+      await refreshFavorites();
+      refreshData();
+      return { path: r.path, title: r.title };
+    },
+    [refreshTree, refreshFavorites, refreshData],
+  );
 
   // 目录树只在这里取一次（此前 store 与 TreeView 各取一次，重复下载 431KB）。
   useEffect(() => {
@@ -493,13 +604,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [applySet]);
 
   const switchSet = useCallback((id: string) => {
+    // 切空间会把当前 set 的 tab 整体收起来（含正在编辑的那篇）→ 先确认未保存改动。
+    if (!confirmLeaveEdit(null)) return;
     try { localStorage.setItem(ACTIVE_SET_KEY, id); } catch { /* ignore */ }
     applySet(id);
     const target = '/set/' + id;
     if (window.location.pathname !== target) {
       try { window.history.pushState(null, '', target); } catch { /* ignore */ }
     }
-  }, [applySet]);
+  }, [applySet, confirmLeaveEdit]);
 
   const saveSets = useCallback(
     async (next: SpaceSet[]) => {
@@ -576,6 +689,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       registerTocControl,
       tocExpandTo,
       tocOpenAll,
+      editingPath,
+      editingDirty,
+      beginEdit,
+      endEdit,
+      setEditingDirty,
+      createDoc,
+      renameDoc,
       fileIndex,
       tree,
       refreshTree,
@@ -620,6 +740,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       registerTocControl,
       tocExpandTo,
       tocOpenAll,
+      editingPath,
+      editingDirty,
+      beginEdit,
+      endEdit,
+      setEditingDirty,
+      createDoc,
+      renameDoc,
       fileIndex,
       tree,
       refreshTree,
