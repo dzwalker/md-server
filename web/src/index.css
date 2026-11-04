@@ -779,8 +779,10 @@
   border-radius: 8px;
 }
 .md-rich-milkdown .milkdown,
-.md-rich-milkdown .ProseMirror {
-  padding: 0;
+.md-editor .md-rich-milkdown .milkdown .ProseMirror {
+  /* Crepe 默认 padding: 60px 120px（独立编辑器的心智模型），在站内要清零，
+     否则内容被挤窄、顶部多出一大块空白 */
+  padding: 0 !important;
   min-height: 60vh;
   background: transparent;
 }
@@ -801,20 +803,24 @@
   --crepe-color-background: transparent;
   --crepe-color-on-background: var(--md-fg, var(--foreground));
   --crepe-color-surface: var(--md-bg, var(--background));
-  --crepe-color-surface-low: color-mix(in srgb, var(--md-bg, var(--background)) 92%, var(--md-fg, var(--foreground)));
+  --crepe-color-surface-low: var(--md-code-bg, var(--muted));
   --crepe-color-on-surface: var(--md-fg, var(--foreground));
   --crepe-color-on-surface-variant: var(--md-muted, var(--muted-foreground));
-  --crepe-color-outline: var(--border);
+  /* 图标/分隔线用 outline：直接映射 --border 会太浅（斜杠菜单图标几乎看不见），
+     这里用「次要文字色」，分隔线再按透明混合处理。 */
+  --crepe-color-outline: var(--md-muted, var(--muted-foreground));
   --crepe-color-primary: var(--md-accent, #0969da);
-  --crepe-color-secondary: color-mix(in srgb, var(--md-accent, #0969da) 16%, transparent);
+  /* secondary 用在代码块/图片块的浅底：用中性浅底，不要沾强调色 */
+  --crepe-color-secondary: color-mix(in srgb, var(--md-fg, var(--foreground)) 10%, transparent);
   --crepe-color-on-secondary: var(--md-fg, var(--foreground));
   --crepe-color-inverse: var(--md-fg, var(--foreground));
   --crepe-color-on-inverse: var(--md-bg, var(--background));
-  --crepe-color-inline-code: var(--md-accent, #0969da);
+  /* 行内代码：阅读态是正文色 + 代码底色，不用强调色 */
+  --crepe-color-inline-code: var(--md-fg, var(--foreground));
   --crepe-color-error: var(--destructive, #dc2626);
   --crepe-color-hover: color-mix(in srgb, var(--md-accent, #0969da) 10%, transparent);
   --crepe-color-selected: color-mix(in srgb, var(--md-accent, #0969da) 18%, transparent);
-  --crepe-color-inline-area: color-mix(in srgb, var(--md-muted, #888) 14%, transparent);
+  --crepe-color-inline-area: var(--md-code-bg, var(--muted));
   --crepe-base-font-size: 15px;
   --crepe-font-default: "Geist Variable", -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
   --crepe-font-title: var(--crepe-font-default);
@@ -826,28 +832,50 @@
   background: transparent;
   box-shadow: none;
 }
-.md-rich-milkdown .ProseMirror {
-  padding: 0;
+.md-editor .md-rich-milkdown .milkdown .ProseMirror {
+  /* Crepe 默认 padding: 60px 120px（独立编辑器的心智模型），在站内要清零，
+     否则内容被挤窄、顶部多出一大块空白 */
+  padding: 0 !important;
   line-height: 1.7;
   color: var(--md-fg, var(--foreground));
+  /* 光标：原生 caret 与 Crepe 的虚拟光标都用正文色（之前走 outline，偏浅） */
+  caret-color: var(--md-fg, var(--foreground));
 }
+.md-editor .md-rich-milkdown .milkdown .ProseMirror-focused { --prosemirror-virtual-cursor-color: var(--md-fg, var(--foreground)); }
+/* 列表标记（圆点/序号/任务框）用次要文字色，与正文形成层次但不至于看不见 */
+.md-editor .md-rich-milkdown .milkdown .milkdown-list-item-block li .label-wrapper { color: var(--md-muted, var(--muted-foreground)); }
+.md-editor .md-rich-milkdown .milkdown .milkdown-list-item-block li .label-wrapper svg { fill: var(--md-muted, var(--muted-foreground)); }
+/* 斜杠菜单 / 工具栏里的图标：跟次要文字同色，选中项高亮成强调色 */
+.md-rich-milkdown .milkdown-slash-menu .menu-group li svg {
+  color: var(--md-muted, var(--muted-foreground));
+}
+.md-rich-milkdown .milkdown-slash-menu .menu-group li.hover svg,
+.md-rich-milkdown .milkdown-slash-menu .menu-group li.active svg {
+  color: var(--md-accent, #0969da);
+}
+.md-rich-milkdown .milkdown-slash-menu .menu-group h6 {
+  color: color-mix(in srgb, var(--md-fg, var(--foreground)) 55%, transparent);
+}
+.md-rich-milkdown .milkdown-slash-menu .menu-group li > span { color: var(--md-fg, var(--foreground)); }
 /* 表格/引用/代码块跟随内容主题（Crepe 的默认边距比阅读态大，略收一点） */
-.md-rich-milkdown .ProseMirror table { border-collapse: collapse; }
-.md-rich-milkdown .ProseMirror th,
-.md-rich-milkdown .ProseMirror td {
+.md-editor .md-rich-milkdown .milkdown .ProseMirror table { border-collapse: collapse; }
+.md-editor .md-rich-milkdown .milkdown .ProseMirror th,
+.md-editor .md-rich-milkdown .milkdown .ProseMirror td {
   border: 1px solid var(--border);
   padding: 5px 10px;
 }
-.md-rich-milkdown .ProseMirror pre {
+.md-editor .md-rich-milkdown .milkdown .ProseMirror pre {
   background: var(--md-code-bg, var(--muted));
   border-radius: 6px;
 }
-.md-rich-milkdown .ProseMirror blockquote {
+.md-editor .md-rich-milkdown .milkdown .ProseMirror blockquote {
   border-left: 4px solid var(--md-quote-border, var(--border));
   background: var(--md-quote, var(--muted));
   padding: 8px 14px;
   margin: 0.6em 0;
 }
+/* Crepe 的引用块自带一条 ::before 竖条，和上面的 border-left 重复，隐藏掉 */
+.md-editor .md-rich-milkdown .milkdown .ProseMirror blockquote::before { display: none; }
 
 /* ==== 编辑态：文档信息（frontmatter）独立折叠区（不交给编辑器）==== */
 .md-frontmatter-edit {
