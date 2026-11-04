@@ -13,85 +13,87 @@ import { renderExtras } from '@/lib/markdown-extras';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { BlockSourceEditor } from './block-source-editor';
+import { MuyaEditor } from './muya-editor';
+import { MilkdownEditor } from './milkdown-editor';
+import type { EditorMode, RichEditorHandle } from './rich-editor-types';
 
 /**
- * 正文编辑器（单栏，见 specs/doc-editing/）。
+ * 正文编辑器（见 specs/doc-editing/）。
  *
- * 交互模型（像 Typora/Obsidian，没有「上面源码、下面预览」的分栏）：
- * - 进入编辑态后整篇仍按**服务端渲染结果**显示（和预览页一模一样）；
- * - 点某一块 → 这一块原地变成源码，但源码是**带格式装饰的**（加粗/斜体/行内代码/链接/
- *   双链/行内公式/图片都按渲染形态显示，标记符号在光标不在其中时隐藏）；
- * - 光标离开 / Esc / 点「完成」→ 这一块回到渲染态（源码变了才重新请求一次服务端渲染）；
- * - 表格 / 围栏代码 / mermaid / 块级公式 / frontmatter / 原始 HTML：空闲时显示服务端渲染
- *   结果，点进去就是源码（「光标进入才显示源码」）。
+ * 四种模式（文档头右侧切换）：
+ * - `blocks`（默认）：单栏分块编辑。空闲块用服务端渲染结果展示，点某一块原地变成带格式装饰的
+ *   源码（CodeMirror 6）。**连续的「行内块」（段落/标题/列表/引用/笔记/分割线）会合并成一个
+ *   编辑区**，点一下就能同时看到并修改多段；表格/围栏代码/图表/块级公式/原始 HTML/frontmatter/
+ *   脚注定义这类「源码 ≠ 渲染结果」的块单独成块，光标进入才显示源码。
+ * - `source`：整篇源码（纯文本框）。
+ * - `muya` / `milkdown`：第三方富文本编辑器（MarkText 内核 / ProseMirror），用于对照体验；
+ *   它们的保存路径是「HTML/DOM → markdown」序列化，会重排原文（见 plan.md 的代价说明）。
  *
- * 真源永远是 Markdown 文本：编辑只替换块的源码行，未编辑的行逐字保留。
+ * 真源永远是 Markdown 文本：分块编辑只替换被编辑区的源码行，未编辑的行逐字保留。
  */
 
-/** 块类型：决定显示名与「空闲时显示什么」。 */
-type BlockKind =
-  | 'text'
-  | 'note'
+/** 编辑单元类型：`region` = 合并后的行内块编辑区，其余是「独立块」。 */
+type UnitKind =
+  | 'region'
   | 'table'
   | 'code'
   | 'mermaid'
   | 'math'
   | 'frontmatter'
-  | 'rule'
   | 'footnote'
   | 'html'
-  | 'quote'
-  | 'list'
   | 'source'
   | 'gap';
 
 interface Segment {
-  kind: 'block' | 'gap';
-  cls: BlockKind;
+  kind: 'unit' | 'gap';
+  cls: UnitKind;
   /** 该段覆盖的源码行（不含行尾换行）。 */
   src: string[];
-  /** 服务端渲染出的 HTML（`source` 段没有）。 */
+  /** 服务端渲染出的 HTML。 */
   html?: string;
-  /** 覆盖 KIND_LABEL 的显示名（如「文档信息」）。 */
+  /** 独立块的显示名（表格/代码块…）。 */
   label?: string;
 }
 
 interface ParsedBlock {
   start: number;
   end: number;
-  cls: BlockKind;
+  /** 独立块的类型；行内块统一为 'region'。 */
+  cls: UnitKind;
   html: string;
+  /** true = 可以并进编辑区（段落/标题/列表/引用/笔记/分割线）。 */
+  inline: boolean;
 }
 
-/** 编辑器里给非正文块显示的小标签（让用户知道自己在看什么）。 */
-const KIND_LABEL: Partial<Record<BlockKind, string>> = {
+const KIND_LABEL: Partial<Record<UnitKind, string>> = {
   table: '表格',
   code: '代码块',
   mermaid: '图表',
   math: '公式块',
   frontmatter: '文档信息',
-  rule: '分割线',
   footnote: '脚注',
   html: 'HTML',
 };
 
-/** 把服务端渲染出的顶层元素归类（依据标签与 markdown-it 的 class 约定）。 */
-function classifyEl(el: Element): { cls: BlockKind; html: string } {
+/** 把服务端渲染出的顶层元素归类：行内块（可合并）vs 独立块。 */
+function classifyEl(el: Element): { cls: UnitKind; html: string; inline: boolean } {
   const tag = el.tagName.toLowerCase();
   const html = (el as HTMLElement).outerHTML;
-  if (tag === 'table') return { cls: 'table', html };
-  if (tag === 'pre') return { cls: el.classList.contains('mermaid-src') ? 'mermaid' : 'code', html };
-  if (tag === 'hr') return { cls: 'rule', html };
-  if (tag === 'details' && el.classList.contains('md-frontmatter')) return { cls: 'frontmatter', html };
-  if (tag === 'span' && el.classList.contains('katex-block')) return { cls: 'math', html };
-  if (tag === 'section' && el.classList.contains('footnotes')) return { cls: 'footnote', html };
-  if (tag === 'div' && el.classList.contains('md-note')) return { cls: 'note', html };
-  if (tag === 'blockquote') return { cls: 'quote', html };
-  if (tag === 'ul' || tag === 'ol') return { cls: 'list', html };
-  if (tag === 'p' || /^h[1-6]$/.test(tag)) {
-    return { cls: 'text', html };
+  if (tag === 'table') return { cls: 'table', html, inline: false };
+  if (tag === 'pre') {
+    return { cls: el.classList.contains('mermaid-src') ? 'mermaid' : 'code', html, inline: false };
   }
-  return { cls: 'html', html };
+  if (tag === 'details' && el.classList.contains('md-frontmatter')) {
+    return { cls: 'frontmatter', html, inline: false };
+  }
+  if (tag === 'span' && el.classList.contains('katex-block')) return { cls: 'math', html, inline: false };
+  if (tag === 'section' && el.classList.contains('footnotes')) return { cls: 'footnote', html, inline: false };
+  if (tag === 'div' && el.classList.contains('md-note')) return { cls: 'region', html, inline: true };
+  if (tag === 'p' || /^h[1-6]$/.test(tag) || tag === 'ul' || tag === 'ol' || tag === 'blockquote' || tag === 'hr') {
+    return { cls: 'region', html, inline: true };
+  }
+  return { cls: 'html', html, inline: false };
 }
 
 /**
@@ -118,43 +120,75 @@ export function parseBlocks(html: string, totalLines: number): ParsedBlock[] {
   return out;
 }
 
-/** 把整篇源码按块区间切成段：块之间的空白行 → gap，块之间夹着的非空行 → source 源码块。 */
+/**
+ * 把整篇源码切成「段」：
+ * - 连续的行内块 → 一个 region（一次编辑多段）；
+ * - 独立块 → 各自一段；
+ * - 块之间的空白行 → gap（不显示输入框，原样回写）；
+ * - 块之间的非空行（原始 HTML、脚注定义、YAML 头）→ source 源码段。
+ */
 export function buildSegments(text: string, html: string): Segment[] {
   const lines = text.split('\n');
   const total = lines.length;
   const blocks = parseBlocks(html, total);
   const segs: Segment[] = [];
   let cursor = 0;
+
   const pushUncovered = (from: number, to: number) => {
     if (to <= from) return;
     const src = lines.slice(from, to);
-    // 纯空行区间只是排版空白：保留原文用于回写，但不在编辑区显示输入框。
     if (src.every((l) => l.trim() === '')) segs.push({ kind: 'gap', cls: 'gap', src });
-    else segs.push({ kind: 'block', cls: 'source', src });
+    else segs.push({ kind: 'unit', cls: 'source', src });
   };
-  for (const b of blocks) {
+
+  let i = 0;
+  while (i < blocks.length) {
+    const b = blocks[i];
     pushUncovered(cursor, b.start - 1);
-    segs.push({ kind: 'block', cls: b.cls, src: lines.slice(b.start - 1, b.end), html: b.html });
-    cursor = b.end;
+    if (b.inline) {
+      // 合并连续的行内块（中间的空白行也一起进这一段的源码）
+      let j = i;
+      while (j + 1 < blocks.length && blocks[j + 1].inline) j += 1;
+      const last = blocks[j];
+      segs.push({
+        kind: 'unit',
+        cls: 'region',
+        src: lines.slice(b.start - 1, last.end),
+        html: blocks
+          .slice(i, j + 1)
+          .map((x) => x.html)
+          .join('\n'),
+      });
+      cursor = last.end;
+      i = j + 1;
+    } else {
+      segs.push({
+        kind: 'unit',
+        cls: b.cls,
+        src: lines.slice(b.start - 1, b.end),
+        html: b.html,
+        label: KIND_LABEL[b.cls],
+      });
+      cursor = b.end;
+      i += 1;
+    }
   }
   pushUncovered(cursor, total);
 
-  // 顶部 frontmatter 的渲染结果不带行号锚点（见 render.test.ts 的约定：它不是笔记定位目标），
-  // 所以它落进源码段；这里给它一个准确的名字，避免只写「源码」。
+  // 顶部 YAML frontmatter 无行号锚点 → 落在源码段里；给它一个准确的名字。
   if (lines[0] === '---') {
-    const close = lines.findIndex((l, i) => i > 0 && (l === '---' || l === '...'));
+    const close = lines.findIndex((l, i2) => i2 > 0 && (l === '---' || l === '...'));
     if (close > 0) {
-      const seg = segs.find((x) => x.kind === 'block' && x.cls === 'source' && x.src.length >= close + 1);
+      const seg = segs.find((x) => x.kind === 'unit' && x.cls === 'source' && x.src.length >= close + 1);
       if (seg) seg.label = '文档信息（YAML）';
     }
   }
 
-  // 空文档：没有任何块时给一个空的**文本块**（不是源码块）——新建文件后第一次输入
-  // 也应该按富文本的方式编辑。
-  if (!segs.some((s) => s.kind === 'block')) {
+  // 空文档：给一个空的编辑区，点进去就能写。
+  if (!segs.some((s) => s.kind === 'unit')) {
     const firstGap = segs.findIndex((s) => s.kind === 'gap');
-    if (firstGap >= 0) segs[firstGap] = { kind: 'block', cls: 'text', src: segs[firstGap].src };
-    else segs.push({ kind: 'block', cls: 'text', src: [''] });
+    if (firstGap >= 0) segs[firstGap] = { kind: 'unit', cls: 'region', src: segs[firstGap].src };
+    else segs.push({ kind: 'unit', cls: 'region', src: [''] });
   }
   return segs;
 }
@@ -172,6 +206,7 @@ export interface DocEditorHandle {
 
 interface DocEditorProps {
   path: string;
+  mode: EditorMode;
   /** 保存成功：父组件负责退出编辑态并重渲染这篇文档。 */
   onSaved: () => void;
   onDirtyChange?: (dirty: boolean) => void;
@@ -180,23 +215,25 @@ interface DocEditorProps {
 }
 
 export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function DocEditor(
-  { path, onSaved, onDirtyChange, onError },
+  { path, mode, onSaved, onDirtyChange, onError },
   ref,
 ) {
   const [segments, setSegments] = useState<Segment[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  /** 正在编辑的块 + 点进来时的鼠标位置（用于把光标放到点到的位置）。 */
+  /** 正在编辑的单元 + 点进来时的鼠标位置。 */
   const [active, setActive] = useState<{ index: number; caret?: { x: number; y: number } } | null>(null);
-  const [sourceMode, setSourceMode] = useState(false);
   const [sourceText, setSourceText] = useState('');
+  const [richText, setRichText] = useState('');
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(false);
   const eolRef = useRef('\n');
   const mtimeRef = useRef<number | undefined>(undefined);
   const originalRef = useRef('');
+  const richRef = useRef<RichEditorHandle>(null);
+  const prevModeRef = useRef<EditorMode>(mode);
 
-  /** 载入磁盘原文 + 服务端渲染，切成块段。 */
+  /** 载入磁盘原文；分块模式还要服务端渲染一次用于切段。 */
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
@@ -210,6 +247,7 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
       originalRef.current = text;
       setSegments(buildSegments(text, r.html));
       setSourceText(text);
+      setRichText(text);
       setActive(null);
       setConflict(false);
     } catch (e) {
@@ -224,17 +262,53 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
   }, [load]);
 
   const text = useMemo(() => {
-    if (sourceMode) return sourceText;
-    return segments ? segmentsText(segments) : '';
-  }, [segments, sourceMode, sourceText]);
+    if (mode === 'blocks') return segments ? segmentsText(segments) : '';
+    if (mode === 'source') return sourceText;
+    return richText;
+  }, [mode, segments, sourceText, richText]);
 
   const dirty = !loading && !loadError && text !== originalRef.current;
+  const textRef = useRef(text);
+  textRef.current = text;
 
   useEffect(() => {
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
 
-  /** 改某一段的源码（编辑块时调用）。 */
+  /** 从富文本模式切回分块：按当前源码重新分块（块结构可能已经被富文本改过）。 */
+  useEffect(() => {
+    const prev = prevModeRef.current;
+    prevModeRef.current = mode;
+    if (mode !== 'blocks' || prev === 'blocks') return;
+    let alive = true;
+    setLoading(true);
+    api
+      .renderBlock(path, textRef.current)
+      .then((r) => {
+        if (alive) setSegments(buildSegments(textRef.current, r.html));
+      })
+      .catch(() => {
+        /* 渲染失败就退回纯源码段 */
+        if (alive) setSegments([{ kind: 'unit', cls: 'source', src: textRef.current.split('\n') }]);
+      })
+      .finally(() => {
+        if (alive) {
+          setLoading(false);
+          setActive(null);
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [mode, path]);
+
+  /** 进入富文本模式前，把当前分块/源码内容同步过去。 */
+  useEffect(() => {
+    if (mode === 'blocks' || mode === 'source') return;
+    setRichText(textRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
   const setSegmentSrc = useCallback((index: number, src: string[]) => {
     setSegments((cur) => {
       if (!cur) return cur;
@@ -244,24 +318,30 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
     });
   }, []);
 
+  /** 取保存用的整篇源码：富文本模式同步 flush 一次，避免防抖丢最后几个字。 */
+  const currentContent = useCallback(() => {
+    if (mode === 'blocks' || mode === 'source') return text;
+    try {
+      const flushed = richRef.current?.flush?.();
+      if (typeof flushed === 'string' && flushed.length) return flushed;
+    } catch {
+      /* ignore */
+    }
+    return richText;
+  }, [mode, text, richText]);
+
   const doSave = useCallback(
     async (opts?: { force?: boolean }) => {
-      if (!segments && !sourceMode) return;
+      if (loading || loadError) return;
       setSaving(true);
       setConflict(false);
       try {
-        const content = text.replace(/\n/g, eolRef.current);
-        await api.saveDoc({
-          path,
-          content,
-          mtimeMs: opts?.force ? undefined : mtimeRef.current,
-        });
-        originalRef.current = text;
+        const content = currentContent().replace(/\n/g, eolRef.current);
+        await api.saveDoc({ path, content, mtimeMs: opts?.force ? undefined : mtimeRef.current });
+        originalRef.current = currentContent();
         onSaved();
       } catch (e) {
         const msg = e instanceof Error ? e.message : '保存失败';
-        // 409 是并发冲突：磁盘在编辑期间被别处改过。不覆盖，交给用户选择。
-        // 冲突条本身已经说明了原因，不再额外弹一条同样的轻提示。
         if (/外部修改/.test(msg)) setConflict(true);
         else onError?.(msg);
         throw e;
@@ -269,7 +349,7 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
         setSaving(false);
       }
     },
-    [path, text, segments, sourceMode, onSaved, onError],
+    [path, loading, loadError, currentContent, onSaved, onError],
   );
 
   useImperativeHandle(
@@ -280,28 +360,6 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
     }),
     [doSave, dirty],
   );
-
-  /** 整篇源码 ↔ 单栏编辑：从源码模式切回来要按当前源码重新分块（块结构可能已经变了）。 */
-  const toggleSourceMode = useCallback(async () => {
-    if (!sourceMode) {
-      setSourceText(segments ? segmentsText(segments) : '');
-      setActive(null);
-      setSourceMode(true);
-      return;
-    }
-    setSourceMode(false);
-    setLoading(true);
-    try {
-      const r = await api.renderBlock(path, sourceText);
-      setSegments(buildSegments(sourceText, r.html));
-    } catch {
-      /* 渲染失败也要能继续编辑：按纯源码块展示 */
-      setSegments([{ kind: 'block', cls: 'source', src: sourceText.split('\n') }]);
-    } finally {
-      setLoading(false);
-      setActive(null);
-    }
-  }, [path, segments, sourceMode, sourceText]);
 
   if (loading) {
     return <div className="px-6 py-10 text-sm text-muted-foreground">载入中…</div>;
@@ -318,16 +376,7 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
   }
 
   return (
-    <div className="md-editor px-6 py-6">
-      <div className="md-editor-toolbar">
-        <span className="md-editor-hint">
-          {dirty ? '有未保存的修改' : '未修改'} · 点任意块编辑，Esc 收起，⌘S 保存
-        </span>
-        <Button variant="ghost" size="sm" className="h-6 px-1.5 text-xs" onClick={() => void toggleSourceMode()}>
-          {sourceMode ? '单栏编辑' : '整篇源码'}
-        </Button>
-      </div>
-
+    <div className="md-editor">
       {conflict && (
         <div className="md-editor-conflict">
           <span>磁盘上的文件在编辑期间被外部修改过，直接保存会覆盖它。</span>
@@ -340,20 +389,24 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
         </div>
       )}
 
-      {sourceMode ? (
+      {mode === 'source' ? (
         <textarea
           className="md-editor-source"
           value={sourceText}
           spellCheck={false}
           onChange={(e) => setSourceText(e.target.value)}
         />
+      ) : mode === 'muya' ? (
+        <MuyaEditor key="muya" ref={richRef} value={richText} onChange={setRichText} />
+      ) : mode === 'milkdown' ? (
+        <MilkdownEditor key="milkdown" ref={richRef} value={richText} onChange={setRichText} />
       ) : (
-        <div className="md-editor-blocks">
+        <div className="md-editor-blocks md-content">
           {(segments ?? []).map((seg, i) =>
             seg.kind === 'gap' ? (
               <div key={i} className="md-editor-gap" />
             ) : (
-              <BlockEditor
+              <Unit
                 key={i}
                 path={path}
                 seg={seg}
@@ -373,7 +426,7 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
   );
 });
 
-interface BlockEditorProps {
+interface UnitProps {
   path: string;
   seg: Segment;
   editing: boolean;
@@ -384,32 +437,31 @@ interface BlockEditorProps {
 }
 
 /**
- * 单块：渲染态 ↔ 源码态。
+ * 单个编辑单元：渲染态 ↔ 源码态。
  *
- * 源码态用 CodeMirror 单栏编辑（带格式装饰）；收起时若源码变了，只重新渲染这一块，
- * 不整篇重载 —— 保持滚动位置与其它块的渲染成果。
+ * 编辑区（region）是「多段合并」的：点进去看到的是这一整段区域的源码（含空行），
+ * 收起时按区域重新渲染一次。独立块（表格/代码/图表…）同理，只是尺寸会随源码行数变化。
  */
-function BlockEditor({ path, seg, editing, caretAt, onStartEdit, onStopEdit, onChange }: BlockEditorProps) {
+function Unit({ path, seg, editing, caretAt, onStartEdit, onStopEdit, onChange }: UnitProps) {
   const src = seg.src.join('\n');
-  const label = seg.label || KIND_LABEL[seg.cls];
+  const label = seg.label;
   const displayRef = useRef<HTMLDivElement>(null);
-  // 当前 html 对应的源码：收起时据此判断「这一块到底改没改」。
   const htmlSrcRef = useRef(src);
   const srcRef = useRef(src);
   srcRef.current = src;
   const [html, setHtml] = useState(seg.html ?? '');
   const [rendering, setRendering] = useState(false);
 
-  // 渲染态下的二次渲染（KaTeX / mermaid）：只在块处于渲染态时做。
+  // 渲染态下的二次渲染（KaTeX / mermaid）
   useEffect(() => {
     if (editing || !displayRef.current) return;
     void renderExtras(displayRef.current);
   }, [editing, html]);
 
-  // 收起编辑后，源码变了就重新渲染这一块（只请求一次，不等输入）。
+  // 收起编辑后，源码变了就重新渲染这一个单元（独立块或整个编辑区）。
   useEffect(() => {
     if (editing) return;
-    if (seg.cls === 'source') return; // 纯源码段没有整体渲染
+    if (seg.cls === 'source') return;
     if (srcRef.current === htmlSrcRef.current) return;
     let alive = true;
     const next = srcRef.current;
@@ -432,20 +484,14 @@ function BlockEditor({ path, seg, editing, caretAt, onStartEdit, onStopEdit, onC
     };
   }, [editing, path, seg.cls]);
 
-  // 纯源码段（未被渲染结果覆盖的行，如原始 HTML 块、脚注定义、YAML 头）：
-  // 没有整体渲染结果，直接给源码编辑器（也是带装饰的）。
+  // 纯源码段（未被渲染结果覆盖的行：原始 HTML、脚注定义、YAML 头）
   if (seg.cls === 'source') {
     return (
       <div className="md-block" data-kind={seg.cls}>
         <div className="md-block-head">
           <span className="md-block-label">{seg.label || '源码'}</span>
         </div>
-        <BlockSourceEditor
-          value={src}
-          docPath={path}
-          onChange={(v) => onChange(v.split('\n'))}
-          onFinish={() => {}}
-        />
+        <BlockSourceEditor value={src} docPath={path} onChange={(v) => onChange(v.split('\n'))} onFinish={() => {}} />
       </div>
     );
   }
@@ -456,9 +502,8 @@ function BlockEditor({ path, seg, editing, caretAt, onStartEdit, onStopEdit, onC
         className={cn('md-block', !html.trim() && 'md-block-empty')}
         data-kind={seg.cls}
         data-editing="false"
-        title="点击编辑这一块"
+        title={seg.cls === 'region' ? '点击编辑这一段' : '点击编辑这一块'}
         onClick={(e) => {
-          // 渲染态里链接/图片不该跳转（编辑态不导航），mermaid 工具条按钮除外。
           if ((e.target as HTMLElement).closest('button')) return;
           e.preventDefault();
           onStartEdit({ x: e.clientX, y: e.clientY });
@@ -471,70 +516,27 @@ function BlockEditor({ path, seg, editing, caretAt, onStartEdit, onStopEdit, onC
           </div>
         )}
         {!html.trim() && <span className="md-block-placeholder">点击开始输入…</span>}
-        {/* md-content：复用预览页那一整套排版样式（标题/表格/代码/引用/列表/图片…） */}
-        <div
-          ref={displayRef}
-          className="md-block-rendered md-content"
-          dangerouslySetInnerHTML={{ __html: html }}
-        />
+        <div ref={displayRef} className="md-block-rendered" dangerouslySetInnerHTML={{ __html: html }} />
       </div>
     );
   }
 
   return (
     <div className="md-block" data-kind={seg.cls} data-editing="true">
-      {/* 有标签的块（表格/代码/图表…）两个状态都保留同一行标签，高度不变；正文块没有标签 */}
       {label && (
         <div className="md-block-head">
           <span className="md-block-label">{label}</span>
           <span className="md-block-head-hint">Esc 收起</span>
         </div>
       )}
-      {seg.cls === 'quote' ? (
-        <div className="md-quote-edit">
-          <BlockSourceEditor
-            value={src}
-            docPath={path}
-            autoFocus
-            caretAt={caretAt}
-            onChange={(v) => onChange(v.split('\n'))}
-            onFinish={onStopEdit}
-          />
-        </div>
-      ) : seg.cls === 'list' ? (
-        <div className="md-list-edit">
-          <BlockSourceEditor
-            value={src}
-            docPath={path}
-            autoFocus
-            caretAt={caretAt}
-            onChange={(v) => onChange(v.split('\n'))}
-            onFinish={onStopEdit}
-          />
-        </div>
-      ) : seg.cls === 'note' ? (
-        <div className="md-note md-note-editing">
-          <div className="md-note-label">笔记</div>
-          <BlockSourceEditor
-            value={src}
-            docPath={path}
-            autoFocus
-            caretAt={caretAt}
-            onChange={(v) => onChange(v.split('\n'))}
-            onFinish={onStopEdit}
-          />
-        </div>
-      ) : (
-        <BlockSourceEditor
-          value={src}
-          docPath={path}
-          autoFocus
-          caretAt={caretAt}
-          onChange={(v) => onChange(v.split('\n'))}
-          onFinish={onStopEdit}
-        />
-      )}
-      {/* 悬浮在右侧，不占布局高度 */}
+      <BlockSourceEditor
+        value={src}
+        docPath={path}
+        autoFocus
+        caretAt={caretAt}
+        onChange={(v) => onChange(v.split('\n'))}
+        onFinish={onStopEdit}
+      />
       <button type="button" className="md-block-done" onClick={onStopEdit}>
         完成
       </button>

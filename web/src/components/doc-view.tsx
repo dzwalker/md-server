@@ -55,6 +55,7 @@ import {
 import { useElementSize } from '@/hooks/use-element-size';
 import { GraphView } from './graph-view';
 import { DocEditor, type DocEditorHandle } from './doc-editor';
+import { EDITOR_MODES, type EditorMode } from './rich-editor-types';
 import { TocPanel } from './toc-panel';
 import {
   MD_MAX_WIDTH,
@@ -171,6 +172,8 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   // 正文编辑态（见 specs/doc-editing/）：草稿全文在 DocEditor 内部，这里只管保存/取消与守卫。
   const editorRef = useRef<DocEditorHandle | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  // 编辑器的四种模式（文档头右侧切换）：分块 / 源码 / Muya / Milkdown
+  const [editorMode, setEditorMode] = useState<EditorMode>('blocks');
   const editing = !!activeDoc && editingPath === activeDoc;
 
   // 正文整篇重注入时的滚动锚点：长文档里 content-visibility 的「记忆尺寸」会随替换丢失，
@@ -550,7 +553,10 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
 
   // 进入编辑态前先收掉正文里可能的笔记编辑器（两套编辑模型不要同时在页面上）。
   useEffect(() => {
-    if (editing) closeActiveNoteEditor();
+    if (editing) {
+      closeActiveNoteEditor();
+      setEditorMode('blocks');
+    }
   }, [editing]);
 
   // 编辑态永远只属于当前文档：万一 activeDoc 被别处切走（未触发守卫的路径），
@@ -780,6 +786,19 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
             >
               {savingEdit ? '保存中…' : '保存'}
             </Button>
+            <div className="md-editor-modes" role="group" aria-label="编辑器切换">
+              {EDITOR_MODES.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  title={m.title}
+                  data-active={editorMode === m.id || undefined}
+                  onClick={() => setEditorMode(m.id)}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
           </>
         )}
         <Button
@@ -880,17 +899,24 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
                 </aside>
               )}
             </div>
-            {/* 正文编辑态：块编辑器替代渲染区（渲染区只是 display:none，DOM 缓存与滚动容器都保留）。 */}
+            {/* 正文编辑态：与渲染区用同一套盒模型（外层 px-6/py-6 + 内层 maxWidth），
+                这样进编辑态时内容宽度、换行点与预览完全一致，不会“跳一下”。 */}
             {editing && activeDoc && (
-              <div className="mx-auto w-full" style={{ maxWidth: mdMax }}>
-                <DocEditor
-                  key={activeDoc}
-                  ref={editorRef}
-                  path={activeDoc}
-                  onSaved={() => void onEditorSaved()}
-                  onDirtyChange={setEditingDirty}
-                  onError={(msg) => showNotice(msg)}
-                />
+              <div
+                className="mx-auto flex w-full items-start px-6 py-6"
+                style={{ maxWidth: containerMax, gap: TOC_GAP }}
+              >
+                <div className="min-w-0 flex-1" style={{ maxWidth: mdMax }}>
+                  <DocEditor
+                    key={activeDoc}
+                    ref={editorRef}
+                    path={activeDoc}
+                    mode={editorMode}
+                    onSaved={() => void onEditorSaved()}
+                    onDirtyChange={setEditingDirty}
+                    onError={(msg) => showNotice(msg)}
+                  />
+                </div>
               </div>
             )}
             {!activeDoc && (
