@@ -66,3 +66,14 @@
   - 取消：不写盘；脏守卫：切 tab 弹确认，拒绝停在编辑器、接受则退出且不写盘。
   - `⌘S` 保存；新建（对话框 → 树更新 → 编辑态 → 首字有预览）；重命名（树/磁盘更新、tab 迁移、编辑中拒绝）。
 - [ ] 用户浏览器手感确认 + 部署（等用户确认，走 deploy skill）。
+
+## T9 单栏编辑器（CodeMirror 6，2026-11-04）
+
+- [x] 新增依赖 `@codemirror/{state,view,language,commands,lang-markdown}`；`lib/md-codemirror.ts` 只在进入编辑态时 `import()`（独立 chunk）。
+- [x] `lib/md-codemirror.ts`：Lezer 语法树 + 正则兜底的行内装饰（粗体/斜体/行内代码/链接/双链/行内公式/图片/标题/引用/代码块/表格/分割线），光标进入即还原源码；CJK 紧贴强调补一份。
+- [x] 列表回车自动续行（无序/有序/任务列表，空项回车退出列表）、Tab 缩进、撤销重做、Esc 收起、⌘S 冒泡到文档级保存。
+- [x] `components/block-source-editor.tsx`：React 包装（动态加载 + 回调走 ref，避免按键重建编辑器）。
+- [x] `doc-editor.tsx` 改为单栏：空闲块显示服务端渲染结果，点进去才创建 CM6；删掉「上面输入框、下面预览框」与 250ms 实时预览请求，收起时只重渲染这一块。
+- [x] 点击位置映射成光标位置（`posAtCoords`），不再总是落在块尾。
+- [x] CSS：CM6 主题变量对齐（`--md-*`）、行内装饰样式、引用/代码块/表格行样式；移除预览框样式。
+- [x] 验证：`npx tsc --noEmit`、`npm test`（132 全绿）、`cd web && npm run build`；临时实例 + 无头 Chromium 实测（装饰、点击换块、Esc 收起重渲染、⌘S 保存、整篇源码切换、取消）。
