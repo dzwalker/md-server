@@ -65,8 +65,10 @@ export const MilkdownEditor = forwardRef<RichEditorHandle, Props>(function Milkd
           [CrepeFeature.TopBar]: false,
         },
       });
+      // 与 Muya 同理：内容没变（还是初始 markdown）就不往上层报
       crepe.on((listener: any) => {
         listener.markdownUpdated((_ctx: unknown, markdown: string) => {
+          if (markdown === initialRef.current) return;
           cbRef.current(markdown);
         });
       });
@@ -78,6 +80,14 @@ export const MilkdownEditor = forwardRef<RichEditorHandle, Props>(function Milkd
 
     return () => {
       alive = false;
+      // 卸载前先把最新 markdown 交回上层：Muya/Crepe 的 content-change 是异步的，
+      // 只靠事件会在「切走模式」时丢掉最后几次输入。
+      try {
+        const md = crepeRef.current?.getMarkdown?.();
+        if (typeof md === 'string') cbRef.current(md);
+      } catch {
+        /* ignore */
+      }
       try {
         void crepeRef.current?.destroy();
       } catch {

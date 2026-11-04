@@ -15,6 +15,10 @@ interface Props {
  * 因此这个模式是「试用/对照」用，保存会改写原文（代价见 specs/doc-editing/plan.md）。
  */
 export const MuyaEditor = forwardRef<RichEditorHandle, Props>(function MuyaEditor({ value, onChange }, ref) {
+  // 注意：Muya 的构造函数会把传入的元素 **replaceWith 成它自己的 div**（见 muya 的 Sb()），
+  // 所以绝不能把 React 直接管理的节点交给它——否则组件卸载时 React 会对一个"已经不在
+  // DOM 里的旧节点"执行 removeChild，抛 NotFoundError。这里给一层 React 稳定的 wrapper，
+  // 由 wrapper 内部自建挂载点交给 Muya，卸载时 React 只移除 wrapper。
   const hostRef = useRef<HTMLDivElement>(null);
   const cbRef = useRef(onChange);
   cbRef.current = onChange;
@@ -41,12 +45,17 @@ export const MuyaEditor = forwardRef<RichEditorHandle, Props>(function MuyaEdito
     const host = hostRef.current;
     if (!host) return;
 
+    // Muya 会替换掉这个挂载点（replaceWith），它不属于 React 的节点树
+    const mount = document.createElement('div');
+    mount.className = 'md-muya-mount';
+    host.appendChild(mount);
+
     void (async () => {
       // 编辑器本体与样式都按需加载
       const mod = (await import('@muyajs/core')) as unknown as { Muya: any };
       await import('@muyajs/core/lib/core.css');
       if (!alive) return;
-      const muya = new mod.Muya(host, {
+      const muya = new mod.Muya(mount, {
         fontSize: 15,
         lineHeight: 1.7,
         frontMatter: true,
@@ -63,9 +72,13 @@ export const MuyaEditor = forwardRef<RichEditorHandle, Props>(function MuyaEdito
       });
       muya.init();
       muya.setContent(initialRef.current);
+      // Muya 只在用户输入时发 content-change（setContent 不发）。这里与初始 markdown 比较：
+      // 内容没变就不往上层报，避免「只是切了个编辑器」被标成未保存。
       muya.on('content-change', () => {
         try {
-          cbRef.current(muya.getMarkdown());
+          const md = muya.getMarkdown();
+          if (md === initialRef.current) return;
+          cbRef.current(md);
         } catch {
           /* 读取失败不影响编辑 */
         }
@@ -77,13 +90,27 @@ export const MuyaEditor = forwardRef<RichEditorHandle, Props>(function MuyaEdito
 
     return () => {
       alive = false;
+      // 卸载前先把最新 markdown 交回上层：Muya/Crepe 的 content-change 是异步的，
+      // 只靠事件会在「切走模式」时丢掉最后几次输入。
+      try {
+        const md = muyaRef.current?.getMarkdown?.();
+        if (typeof md === 'string') cbRef.current(md);
+      } catch {
+        /* ignore */
+      }
       try {
         const m = muyaRef.current as unknown as { destroy?: () => void } | null;
         m?.destroy?.();
       } catch {
-        /* ignore */
+        /* ignore：卸载期间 Muya 内部可能已在操作已被移除的节点 */
       }
       muyaRef.current = null;
+      // 兜底：Muya 没清干净的残留节点自己收掉（wrapper 马上会被 React 移除）
+      try {
+        mount.remove();
+      } catch {
+        /* ignore */
+      }
     };
   }, []);
 

@@ -232,6 +232,8 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
   const originalRef = useRef('');
   const richRef = useRef<RichEditorHandle>(null);
   const prevModeRef = useRef<EditorMode>(mode);
+  /** 最后一次已知的整篇源码：模式切换时用它给目标模式的 state 播种（否则会读到旧值）。 */
+  const lastGoodRef = useRef('');
 
   /** 载入磁盘原文；分块模式还要服务端渲染一次用于切段。 */
   const load = useCallback(async () => {
@@ -248,6 +250,7 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
       setSegments(buildSegments(text, r.html));
       setSourceText(text);
       setRichText(text);
+      lastGoodRef.current = text;
       setActive(null);
       setConflict(false);
     } catch (e) {
@@ -275,47 +278,60 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
 
-  /** 从富文本模式切回分块：按当前源码重新分块（块结构可能已经被富文本改过）。 */
+  /** 进入富文本/源码模式：把当前分块内容同步过去（从「最后一次已知内容」取，避免读到旧 state）。 */
+  useEffect(() => {
+    if (mode === 'source') setSourceText(lastGoodRef.current);
+    else if (mode !== 'blocks') setRichText(lastGoodRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+  /** 从富文本/源码模式切回分块：按当前源码重新分块（块结构可能已经被改过）。 */
   useEffect(() => {
     const prev = prevModeRef.current;
     prevModeRef.current = mode;
     if (mode !== 'blocks' || prev === 'blocks') return;
     let alive = true;
     setLoading(true);
-    api
-      .renderBlock(path, textRef.current)
-      .then((r) => {
-        if (alive) setSegments(buildSegments(textRef.current, r.html));
-      })
-      .catch(() => {
-        /* 渲染失败就退回纯源码段 */
-        if (alive) setSegments([{ kind: 'unit', cls: 'source', src: textRef.current.split('\n') }]);
-      })
-      .finally(() => {
-        if (alive) {
-          setLoading(false);
-          setActive(null);
-        }
-      });
+    // 延后一帧：切走富文本时，它的卸载回调会先把最新 markdown flush 回 lastGoodRef，
+    // 这里立刻读会读到 flush 之前的值。
+    const timer = window.setTimeout(() => {
+      if (!alive) return;
+      api
+        .renderBlock(path, lastGoodRef.current)
+        .then((r) => {
+          if (alive) setSegments(buildSegments(lastGoodRef.current, r.html));
+        })
+        .catch(() => {
+          /* 渲染失败就退回纯源码段 */
+          if (alive) setSegments([{ kind: 'unit', cls: 'source', src: lastGoodRef.current.split('\n') }]);
+        })
+        .finally(() => {
+          if (alive) {
+            setLoading(false);
+            setActive(null);
+          }
+        });
+    }, 0);
     return () => {
       alive = false;
+      window.clearTimeout(timer);
     };
   }, [mode, path]);
-
-  /** 进入富文本模式前，把当前分块/源码内容同步过去。 */
-  useEffect(() => {
-    if (mode === 'blocks' || mode === 'source') return;
-    setRichText(textRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
 
   const setSegmentSrc = useCallback((index: number, src: string[]) => {
     setSegments((cur) => {
       if (!cur) return cur;
       const next = cur.slice();
       next[index] = { ...next[index], src };
+      lastGoodRef.current = segmentsText(next);
       return next;
     });
+  }, []);
+
+  /** 富文本编辑器回调：写 state 的同时更新「最后一次已知内容」。 */
+  const onRichChange = useCallback((v: string) => {
+    lastGoodRef.current = v;
+    setRichText(v);
   }, []);
 
   /** 取保存用的整篇源码：富文本模式同步 flush 一次，避免防抖丢最后几个字。 */
@@ -394,12 +410,15 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
           className="md-editor-source"
           value={sourceText}
           spellCheck={false}
-          onChange={(e) => setSourceText(e.target.value)}
+          onChange={(e) => {
+            lastGoodRef.current = e.target.value;
+            setSourceText(e.target.value);
+          }}
         />
       ) : mode === 'muya' ? (
-        <MuyaEditor key="muya" ref={richRef} value={richText} onChange={setRichText} />
+        <MuyaEditor key="muya" ref={richRef} value={richText} onChange={onRichChange} />
       ) : mode === 'milkdown' ? (
-        <MilkdownEditor key="milkdown" ref={richRef} value={richText} onChange={setRichText} />
+        <MilkdownEditor key="milkdown" ref={richRef} value={richText} onChange={onRichChange} />
       ) : (
         <div className="md-editor-blocks md-content">
           {(segments ?? []).map((seg, i) =>
@@ -451,6 +470,16 @@ function Unit({ path, seg, editing, caretAt, onStartEdit, onStopEdit, onChange }
   srcRef.current = src;
   const [html, setHtml] = useState(seg.html ?? '');
   const [rendering, setRendering] = useState(false);
+  // 外部（模式切换后重建分块）给了新的渲染结果时，同步进来；
+  // 否则组件按 index 复用会一直显示旧 HTML，丢掉在富文本模式里改的内容。
+  const appliedPropRef = useRef(seg.html);
+  useEffect(() => {
+    if (seg.html === appliedPropRef.current) return;
+    appliedPropRef.current = seg.html;
+    if (editing) return;
+    setHtml(seg.html ?? '');
+    htmlSrcRef.current = seg.src.join('\n');
+  }, [seg.html, seg.src, editing]);
 
   // 渲染态下的二次渲染（KaTeX / mermaid）
   useEffect(() => {
