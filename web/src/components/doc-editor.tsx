@@ -40,6 +40,8 @@ type BlockKind =
   | 'rule'
   | 'footnote'
   | 'html'
+  | 'quote'
+  | 'list'
   | 'source'
   | 'gap';
 
@@ -84,7 +86,9 @@ function classifyEl(el: Element): { cls: BlockKind; html: string } {
   if (tag === 'span' && el.classList.contains('katex-block')) return { cls: 'math', html };
   if (tag === 'section' && el.classList.contains('footnotes')) return { cls: 'footnote', html };
   if (tag === 'div' && el.classList.contains('md-note')) return { cls: 'note', html };
-  if (tag === 'p' || /^h[1-6]$/.test(tag) || tag === 'ul' || tag === 'ol' || tag === 'blockquote') {
+  if (tag === 'blockquote') return { cls: 'quote', html };
+  if (tag === 'ul' || tag === 'ol') return { cls: 'list', html };
+  if (tag === 'p' || /^h[1-6]$/.test(tag)) {
     return { cls: 'text', html };
   }
   return { cls: 'html', html };
@@ -347,7 +351,7 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
         <div className="md-editor-blocks">
           {(segments ?? []).map((seg, i) =>
             seg.kind === 'gap' ? (
-              <div key={i} className="md-editor-gap" style={{ height: `${Math.min(seg.src.length, 4) * 0.6}em` }} />
+              <div key={i} className="md-editor-gap" />
             ) : (
               <BlockEditor
                 key={i}
@@ -451,6 +455,7 @@ function BlockEditor({ path, seg, editing, caretAt, onStartEdit, onStopEdit, onC
       <div
         className={cn('md-block', !html.trim() && 'md-block-empty')}
         data-kind={seg.cls}
+        data-editing="false"
         title="点击编辑这一块"
         onClick={(e) => {
           // 渲染态里链接/图片不该跳转（编辑态不导航），mermaid 工具条按钮除外。
@@ -459,35 +464,80 @@ function BlockEditor({ path, seg, editing, caretAt, onStartEdit, onStopEdit, onC
           onStartEdit({ x: e.clientX, y: e.clientY });
         }}
       >
-        {!html.trim() && <span className="md-block-placeholder">点击开始输入…</span>}
         {label && (
           <div className="md-block-head">
             <span className="md-block-label">{label}</span>
             <span className="md-block-head-hint">{rendering ? '渲染中…' : '点击编辑'}</span>
           </div>
         )}
-        <div ref={displayRef} className="md-block-rendered" dangerouslySetInnerHTML={{ __html: html }} />
+        {!html.trim() && <span className="md-block-placeholder">点击开始输入…</span>}
+        {/* md-content：复用预览页那一整套排版样式（标题/表格/代码/引用/列表/图片…） */}
+        <div
+          ref={displayRef}
+          className="md-block-rendered md-content"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
       </div>
     );
   }
 
   return (
-    <div className={cn('md-block md-block-editing')} data-kind={seg.cls}>
-      <div className="md-block-head">
-        <span className="md-block-label">{label || '编辑中'}</span>
-        <span className="md-block-head-hint">Esc 收起</span>
-        <button type="button" className="md-block-done" onClick={onStopEdit}>
-          完成
-        </button>
-      </div>
-      <BlockSourceEditor
-        value={src}
-        docPath={path}
-        autoFocus
-        caretAt={caretAt}
-        onChange={(v) => onChange(v.split('\n'))}
-        onFinish={onStopEdit}
-      />
+    <div className="md-block" data-kind={seg.cls} data-editing="true">
+      {/* 有标签的块（表格/代码/图表…）两个状态都保留同一行标签，高度不变；正文块没有标签 */}
+      {label && (
+        <div className="md-block-head">
+          <span className="md-block-label">{label}</span>
+          <span className="md-block-head-hint">Esc 收起</span>
+        </div>
+      )}
+      {seg.cls === 'quote' ? (
+        <div className="md-quote-edit">
+          <BlockSourceEditor
+            value={src}
+            docPath={path}
+            autoFocus
+            caretAt={caretAt}
+            onChange={(v) => onChange(v.split('\n'))}
+            onFinish={onStopEdit}
+          />
+        </div>
+      ) : seg.cls === 'list' ? (
+        <div className="md-list-edit">
+          <BlockSourceEditor
+            value={src}
+            docPath={path}
+            autoFocus
+            caretAt={caretAt}
+            onChange={(v) => onChange(v.split('\n'))}
+            onFinish={onStopEdit}
+          />
+        </div>
+      ) : seg.cls === 'note' ? (
+        <div className="md-note md-note-editing">
+          <div className="md-note-label">笔记</div>
+          <BlockSourceEditor
+            value={src}
+            docPath={path}
+            autoFocus
+            caretAt={caretAt}
+            onChange={(v) => onChange(v.split('\n'))}
+            onFinish={onStopEdit}
+          />
+        </div>
+      ) : (
+        <BlockSourceEditor
+          value={src}
+          docPath={path}
+          autoFocus
+          caretAt={caretAt}
+          onChange={(v) => onChange(v.split('\n'))}
+          onFinish={onStopEdit}
+        />
+      )}
+      {/* 悬浮在右侧，不占布局高度 */}
+      <button type="button" className="md-block-done" onClick={onStopEdit}>
+        完成
+      </button>
     </div>
   );
 }
