@@ -60,7 +60,7 @@ markdown-it 的 fence 规则：`highlight` 返回以 `<pre` 开头的字符串�
 - `renameDoc(path, name)`：改名 → 迁移 openDocs / activeDoc / renderCache / scrollTarget → 刷新树与收藏；正在编辑该文档时直接抛错。
 - reducer 增加 `rename` 动作（tab 路径与标题一起换）。
 
-### 3.2 编辑器（`components/doc-editor.tsx`，新增）
+### 3.2 编辑器（`components/doc-editor.tsx` + `components/block-source-editor.tsx` + `lib/md-codemirror.ts`）
 
 数据模型：整篇源码按「段」组织，段是**唯一真源**的切分，不靠行号二次定位：
 
@@ -69,12 +69,19 @@ segments = [ {kind:'gap', src:['','']}, {kind:'block', cls:'text', src:[...], ht
 整篇源码 = segments.map(s => s.src.join('\n')).join('\n')
 ```
 
-- 进入编辑：`GET /api/files/*` 取原文（记 `eol`、`mtimeMs`）→ `POST /api/render-block` 渲染整篇 → 用顶层元素的 `data-line-start/end` 切段；块之间的空白行→`gap`（不显示输入框，原样回写）；块之间的非空行（原始 HTML、脚注定义等）→`source` 源码块。
-- 每块两态：**渲染态**（服务端 HTML，进块时跑一次 `renderExtras` 出公式/图表）↔ **源码态**（textarea，自动高度）。失焦且内容变了 → 服务端再渲染一次（非 live 块就是「失焦渲染一次」）。
-- live 块（`text` / `note`）：输入防抖 250ms + 防中文输入法组字，预览更新；`Tab` 插两个空格，`Esc` 收起这一块。
-- 空文档：给一个空的 `text` 块 + 「点击开始输入…」占位，保证新建后第一次输入就有实时预览。
+- 进入编辑：`GET /api/files/*` 取原文（记 `eol`、`mtimeMs`）→ `POST /api/render-block` 渲染整篇 → 用顶层元素的 `data-line-start/end` 切段；块之间的空白行→`gap`（不显示输入框，原样回写）；块之间的非空行（原始 HTML、脚注定义、YAML 头）→`source` 源码块。
+- **单栏编辑（没有上下分栏）**：块空闲时用服务端渲染结果展示；点某块 → 原地换成 CodeMirror 源码编辑器（`block-source-editor.tsx`，`import('@/lib/md-codemirror')` **动态加载**）。
+- **行内装饰**（`md-codemirror.ts`）：用 Lezer markdown 语法树 + 少量正则兜底，实现 Typora 式手感——
+  - 加粗/斜体/行内代码：内容按格式显示，标记符号藏掉；
+  - 链接：只显示链接文字（`[` 与 `](url)` 藏掉）；双链 `[[x|y]]` 按链接样式显示；
+  - 行内公式 `$…$`：KaTeX widget；图片：`<img>` widget（相对路径按 `/api/asset` 改写）；
+  - 标题/引用/代码块/表格/分割线：行级样式；标题 `#` 在光标不在该行时藏掉；
+  - **光标进入即还原成源码**：装饰只在选区不与之相交时生效；
+  - CJK 紧贴强调（`**"中文"**中文`）用正则补一份，保证与 markdown-it（cjk-friendly）一致。
+- 列表回车自动续行、Tab 缩进、⌘Z/⌘⇧Z 撤销重做（CM6 history）、`Esc` 收起当前块、`⌘S` 保存（事件冒泡到文档级快捷键）。
+- 收起编辑：源码变了才 `POST /api/render-block` 重新渲染**这一块**并更新缓存，不整篇重载。
 - 保存：`POST /api/docs`（`mtimeMs` 乐观锁）→ `onSaved()` → 父组件退出编辑态并重渲染；409 时置 `conflict`，给「覆盖保存（不带 mtime）/ 放弃修改并重新载入」。
-- 兜底：「整篇源码」切换（切回时按当前源码重新分块）。
+- 兜底：「整篇源码」切换（普通 textarea，不改块结构）。
 
 ### 3.3 文档视图（`components/doc-view.tsx`）
 
@@ -95,7 +102,7 @@ segments = [ {kind:'gap', src:['','']}, {kind:'block', cls:'text', src:[...], ht
 - **写盘例外从「只改笔记行」扩到「整篇正文 + 新建 + 改名」**（`AGENTS.md` 原则 4 已同步更新；这是用户明确要求的产品能力）。
 - API 新增 4 个（`/api/docs`、`/api/docs/create`、`/api/docs/rename`、`/api/render-block`），不改旧接口；MCP 工具未变。
 - 渲染器只多打一个属性（fence 的 `data-line-*`），HTML 结构与样式不变；笔记/术语表/目录行为不受影响。
-- 前端不新增依赖（预览全部走服务端）。
+- 前端新增依赖：`@codemirror/{state,view,language,commands,lang-markdown}`（只在进入编辑态时动态加载，`md-codemirror-*.js` 独立 chunk ≈492KB 原始 / 阅读路径不受影响）。
 - 改名不迁移引用：`[[双链]]` / 相对链接仍指向旧路径（确认框提示，v1 不自动改）。
 - 编辑态下滚动位置会回到顶部（渲染区被 `display:none`，滚动容器高度归零）；这是已知取舍。
 
@@ -105,7 +112,7 @@ segments = [ {kind:'gap', src:['','']}, {kind:'block', cls:'text', src:[...], ht
 |---|---|
 | 保存覆盖别处的改动 | mtime 乐观锁 + 409 + 显式「覆盖保存」；不传 mtime 只由用户在冲突条上点选 |
 | 块区间与渲染结构对不上（异常 HTML/脚注） | 未覆盖区间退化成源码块；再兜底「整篇源码」；解析不出任何块时给空文本块 |
-| 大文档进入编辑慢 | 进入只做 1 次原文读取 + 1 次整篇渲染；每块渲染态二次渲染按块懒跑（mermaid 走 IntersectionObserver） |
+| 大文档进入编辑慢 | 进入只做 1 次原文读取 + 1 次整篇渲染；每块渲染态二次渲染按块懒跑（mermaid 走 IntersectionObserver）；源码编辑器只在点开的那一块创建 |
 | 前端构建产物没更新 | 部署走 `docker compose up -d --build`（Dockerfile 里会 `npm run build`）；本机验证必须重建 `web/dist` |
 | 回滚 | 单 commit 可整体回退；写盘能力只在新路由上，旧功能（笔记 / 只读浏览）不依赖 `docs.ts` |
 

@@ -12,23 +12,23 @@ import { api } from '@/lib/api';
 import { renderExtras } from '@/lib/markdown-extras';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { BlockSourceEditor } from './block-source-editor';
 
 /**
- * 正文块编辑器（见 specs/doc-editing/）。
+ * 正文编辑器（单栏，见 specs/doc-editing/）。
  *
- * 设计要点：
- * 1. **唯一真源是整篇源码**：进入编辑时取磁盘原文，按服务端渲染结果里的
- *    `data-line-start/data-line-end` 锚点切成「行区间段」；编辑某一块就是替换这一段的源码行，
- *    未编辑的行逐字保留（空行 / frontmatter / 脚注定义都不会丢）。
- * 2. **格式实时渲染**：活跃块每次输入（防抖 250ms）把这一块的源码交给
- *    `POST /api/render-block`（服务端同一套 markdown-it 管线，目录/术语表上下文一致），
- *    在块下方显示实时预览。表格 / 代码 / 图表 / 块级公式 / 原始 HTML 等重型块**不**实时渲染
- *    （列宽抖动、3.3MB mermaid 库、光标跳动），只在失焦或点「预览」时渲染一次。
- * 3. **块与块之间的空白行不进编辑区**：它们只是排版，按原样保留在段序列里。
- * 4. 文本域里 Enter 换行、Tab 插两个空格、Esc 收起草稿回到渲染态；⌘S 保存由父组件接。
+ * 交互模型（像 Typora/Obsidian，没有「上面源码、下面预览」的分栏）：
+ * - 进入编辑态后整篇仍按**服务端渲染结果**显示（和预览页一模一样）；
+ * - 点某一块 → 这一块原地变成源码，但源码是**带格式装饰的**（加粗/斜体/行内代码/链接/
+ *   双链/行内公式/图片都按渲染形态显示，标记符号在光标不在其中时隐藏）；
+ * - 光标离开 / Esc / 点「完成」→ 这一块回到渲染态（源码变了才重新请求一次服务端渲染）；
+ * - 表格 / 围栏代码 / mermaid / 块级公式 / frontmatter / 原始 HTML：空闲时显示服务端渲染
+ *   结果，点进去就是源码（「光标进入才显示源码」）。
+ *
+ * 真源永远是 Markdown 文本：编辑只替换块的源码行，未编辑的行逐字保留。
  */
 
-/** 块类型：决定「编辑时是否实时预览」与界面上给的小标签。 */
+/** 块类型：决定显示名与「空闲时显示什么」。 */
 type BlockKind =
   | 'text'
   | 'note'
@@ -61,10 +61,7 @@ interface ParsedBlock {
   html: string;
 }
 
-/** 只有这几类块值得实时渲染：段落/标题/列表/引用（text）与笔记卡片（note）。 */
-const LIVE_KINDS = new Set<BlockKind>(['text', 'note']);
-
-/** 编辑器里给非实时块显示的小标签（让用户知道自己在看什么）。 */
+/** 编辑器里给非正文块显示的小标签（让用户知道自己在看什么）。 */
 const KIND_LABEL: Partial<Record<BlockKind, string>> = {
   table: '表格',
   code: '代码块',
@@ -74,17 +71,14 @@ const KIND_LABEL: Partial<Record<BlockKind, string>> = {
   rule: '分割线',
   footnote: '脚注',
   html: 'HTML',
-  source: '源码',
 };
 
-/** 把服务端渲染出的顶层元素归类（判断依据是标签与 markdown-it 的 class 约定）。 */
+/** 把服务端渲染出的顶层元素归类（依据标签与 markdown-it 的 class 约定）。 */
 function classifyEl(el: Element): { cls: BlockKind; html: string } {
   const tag = el.tagName.toLowerCase();
   const html = (el as HTMLElement).outerHTML;
   if (tag === 'table') return { cls: 'table', html };
-  if (tag === 'pre') {
-    return { cls: el.classList.contains('mermaid-src') ? 'mermaid' : 'code', html };
-  }
+  if (tag === 'pre') return { cls: el.classList.contains('mermaid-src') ? 'mermaid' : 'code', html };
   if (tag === 'hr') return { cls: 'rule', html };
   if (tag === 'details' && el.classList.contains('md-frontmatter')) return { cls: 'frontmatter', html };
   if (tag === 'span' && el.classList.contains('katex-block')) return { cls: 'math', html };
@@ -140,6 +134,7 @@ export function buildSegments(text: string, html: string): Segment[] {
     cursor = b.end;
   }
   pushUncovered(cursor, total);
+
   // 顶部 frontmatter 的渲染结果不带行号锚点（见 render.test.ts 的约定：它不是笔记定位目标），
   // 所以它落进源码段；这里给它一个准确的名字，避免只写「源码」。
   if (lines[0] === '---') {
@@ -149,8 +144,9 @@ export function buildSegments(text: string, html: string): Segment[] {
       if (seg) seg.label = '文档信息（YAML）';
     }
   }
+
   // 空文档：没有任何块时给一个空的**文本块**（不是源码块）——新建文件后第一次输入
-  // 也应该有实时预览，而不是从「源码」模式开始。
+  // 也应该按富文本的方式编辑。
   if (!segs.some((s) => s.kind === 'block')) {
     const firstGap = segs.findIndex((s) => s.kind === 'gap');
     if (firstGap >= 0) segs[firstGap] = { kind: 'block', cls: 'text', src: segs[firstGap].src };
@@ -186,7 +182,8 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
   const [segments, setSegments] = useState<Segment[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [active, setActive] = useState<number | null>(null);
+  /** 正在编辑的块 + 点进来时的鼠标位置（用于把光标放到点到的位置）。 */
+  const [active, setActive] = useState<{ index: number; caret?: { x: number; y: number } } | null>(null);
   const [sourceMode, setSourceMode] = useState(false);
   const [sourceText, setSourceText] = useState('');
   const [saving, setSaving] = useState(false);
@@ -280,7 +277,7 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
     [doSave, dirty],
   );
 
-  /** 整篇源码 ↔ 分块：从源码模式切回来要按当前源码重新分块（块结构可能已经变了）。 */
+  /** 整篇源码 ↔ 单栏编辑：从源码模式切回来要按当前源码重新分块（块结构可能已经变了）。 */
   const toggleSourceMode = useCallback(async () => {
     if (!sourceMode) {
       setSourceText(segments ? segmentsText(segments) : '');
@@ -320,10 +317,10 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
     <div className="md-editor px-6 py-6">
       <div className="md-editor-toolbar">
         <span className="md-editor-hint">
-          {dirty ? '有未保存的修改' : '未修改'} · 点任意块编辑，⌘S 保存
+          {dirty ? '有未保存的修改' : '未修改'} · 点任意块编辑，Esc 收起，⌘S 保存
         </span>
         <Button variant="ghost" size="sm" className="h-6 px-1.5 text-xs" onClick={() => void toggleSourceMode()}>
-          {sourceMode ? '分块编辑' : '整篇源码'}
+          {sourceMode ? '单栏编辑' : '整篇源码'}
         </Button>
       </div>
 
@@ -356,9 +353,10 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
                 key={i}
                 path={path}
                 seg={seg}
-                editing={active === i}
-                onStartEdit={() => setActive(i)}
-                onStopEdit={() => setActive((cur) => (cur === i ? null : cur))}
+                editing={active?.index === i}
+                caretAt={active?.index === i ? active.caret : undefined}
+                onStartEdit={(caret) => setActive({ index: i, caret })}
+                onStopEdit={() => setActive((cur) => (cur?.index === i ? null : cur))}
                 onChange={(src) => setSegmentSrc(i, src)}
               />
             ),
@@ -375,61 +373,28 @@ interface BlockEditorProps {
   path: string;
   seg: Segment;
   editing: boolean;
-  onStartEdit: () => void;
+  caretAt?: { x: number; y: number };
+  onStartEdit: (caret?: { x: number; y: number }) => void;
   onStopEdit: () => void;
   onChange: (src: string[]) => void;
 }
 
-/** 单块编辑器：渲染态 ↔ 源码态；live 块在源码态下方显示实时预览。 */
-function BlockEditor({ path, seg, editing, onStartEdit, onStopEdit, onChange }: BlockEditorProps) {
+/**
+ * 单块：渲染态 ↔ 源码态。
+ *
+ * 源码态用 CodeMirror 单栏编辑（带格式装饰）；收起时若源码变了，只重新渲染这一块，
+ * 不整篇重载 —— 保持滚动位置与其它块的渲染成果。
+ */
+function BlockEditor({ path, seg, editing, caretAt, onStartEdit, onStopEdit, onChange }: BlockEditorProps) {
   const src = seg.src.join('\n');
-  const live = LIVE_KINDS.has(seg.cls);
-  const label = KIND_LABEL[seg.cls];
+  const label = seg.label || KIND_LABEL[seg.cls];
   const displayRef = useRef<HTMLDivElement>(null);
-  const previewRef = useRef<HTMLDivElement>(null);
-  const taRef = useRef<HTMLTextAreaElement>(null);
-  // 渲染态用的 HTML：编辑过的块用「最新一次服务端渲染结果」，否则用服务端整篇渲染里的那一段。
-  const [html, setHtml] = useState(seg.html ?? '');
-  // live 块的实时预览；非 live 块只在失焦/点「预览」时更新一次。
-  const [previewHtml, setPreviewHtml] = useState(seg.html ?? '');
-  const [rendering, setRendering] = useState(false);
-  // 组字结束后不一定有新输入事件：用一个计数器把预览 effect 再踢一次。
-  const [tick, setTick] = useState(0);
+  // 当前 html 对应的源码：收起时据此判断「这一块到底改没改」。
+  const htmlSrcRef = useRef(src);
   const srcRef = useRef(src);
-  // 当前 `html` / `previewHtml` 对应的源码：失焦时用来判断「这一块到底改没改」。
-  const renderedSrcRef = useRef(src);
-
   srcRef.current = src;
-
-  /** 调服务端渲染这一段源码。 */
-  const renderBlock = useCallback(async (): Promise<string | null> => {
-    try {
-      const r = await api.renderBlock(path, srcRef.current);
-      renderedSrcRef.current = srcRef.current;
-      return r.html;
-    } catch {
-      return null;
-    }
-  }, [path]);
-
-  // live 块：输入防抖后实时预览（中文输入法组字期间不发请求）。
-  const composingRef = useRef(false);
-  useEffect(() => {
-    if (!editing || !live) return;
-    const id = window.setTimeout(() => {
-      if (composingRef.current) return;
-      setRendering(true);
-      void renderBlock().then((next) => {
-        if (next !== null) {
-          setPreviewHtml(next);
-          // 预览已经是最新渲染：失焦时就不必再请求一次。
-          if (srcRef.current === renderedSrcRef.current) setHtml(next);
-        }
-        setRendering(false);
-      });
-    }, 250);
-    return () => window.clearTimeout(id);
-  }, [editing, live, src, renderBlock, tick]);
+  const [html, setHtml] = useState(seg.html ?? '');
+  const [rendering, setRendering] = useState(false);
 
   // 渲染态下的二次渲染（KaTeX / mermaid）：只在块处于渲染态时做。
   useEffect(() => {
@@ -437,90 +402,51 @@ function BlockEditor({ path, seg, editing, onStartEdit, onStopEdit, onChange }: 
     void renderExtras(displayRef.current);
   }, [editing, html]);
 
-  // 预览区里的公式（KaTeX）需要客户端渲染。
+  // 收起编辑后，源码变了就重新渲染这一块（只请求一次，不等输入）。
   useEffect(() => {
-    if (!editing || !live || !previewRef.current) return;
-    void renderExtras(previewRef.current);
-  }, [editing, live, previewHtml]);
-
-  // 进入源码态：自适应高度 + 聚焦并把光标放到末尾。
-  useEffect(() => {
-    if (!editing) return;
-    const ta = taRef.current;
-    if (!ta) return;
-    ta.style.height = 'auto';
-    ta.style.height = `${Math.max(ta.scrollHeight, 40)}px`;
-    ta.focus();
-    ta.setSelectionRange(ta.value.length, ta.value.length);
-  }, [editing]);
-
-  // 常驻文本域（源码块）挂载后也要自适应高度。
-  useEffect(() => {
-    if (seg.cls !== 'source' || editing) return;
-    const ta = taRef.current;
-    if (!ta) return;
-    ta.style.height = 'auto';
-    ta.style.height = `${Math.max(ta.scrollHeight, 40)}px`;
-  }, [seg.cls, editing, src]);
-
-  const autosize = useCallback(() => {
-    const ta = taRef.current;
-    if (!ta) return;
-    ta.style.height = 'auto';
-    ta.style.height = `${Math.max(ta.scrollHeight, 40)}px`;
-  }, []);
-
-  /** 收起源码态：内容变了就重新渲染一次（失焦渲染），没变直接回渲染态。 */
-  const finish = useCallback(async () => {
-    onStopEdit();
-    if (srcRef.current === renderedSrcRef.current) return;
+    if (editing) return;
+    if (seg.cls === 'source') return; // 纯源码段没有整体渲染
+    if (srcRef.current === htmlSrcRef.current) return;
+    let alive = true;
+    const next = srcRef.current;
     setRendering(true);
-    const next = await renderBlock();
-    if (next !== null) {
-      setHtml(next);
-      setPreviewHtml(next);
-    }
-    setRendering(false);
-  }, [onStopEdit, renderBlock]);
+    api
+      .renderBlock(path, next)
+      .then((r) => {
+        if (!alive) return;
+        setHtml(r.html);
+        htmlSrcRef.current = next;
+      })
+      .catch(() => {
+        /* 渲染失败：保留上一版 HTML，源码仍是真源 */
+      })
+      .finally(() => {
+        if (alive) setRendering(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [editing, path, seg.cls]);
+
+  // 纯源码段（未被渲染结果覆盖的行，如原始 HTML 块、脚注定义、YAML 头）：
+  // 没有整体渲染结果，直接给源码编辑器（也是带装饰的）。
+  if (seg.cls === 'source') {
+    return (
+      <div className="md-block" data-kind={seg.cls}>
+        <div className="md-block-head">
+          <span className="md-block-label">{seg.label || '源码'}</span>
+        </div>
+        <BlockSourceEditor
+          value={src}
+          docPath={path}
+          onChange={(v) => onChange(v.split('\n'))}
+          onFinish={() => {}}
+        />
+      </div>
+    );
+  }
 
   if (!editing) {
-    // 纯源码段（未被渲染结果覆盖的行，如原始 HTML 块、脚注定义）：没有整体渲染结果，
-    // 一直显示源码框（直接可编辑）；想看渲染效果就点「预览」渲染一次。
-    if (seg.cls === 'source') {
-      return (
-        <div className="md-block" data-kind={seg.cls}>
-          <div className="md-block-head">
-            <span className="md-block-label">{seg.label || '源码'}</span>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="ml-auto h-6 px-1.5 text-xs"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                setRendering(true);
-                void renderBlock().then((next) => {
-                  if (next !== null) setPreviewHtml(next);
-                  setRendering(false);
-                });
-              }}
-            >
-              预览{rendering ? '中…' : ''}
-            </Button>
-          </div>
-          <textarea
-            ref={taRef}
-            className="md-block-source"
-            value={src}
-            spellCheck={false}
-            onChange={(e) => onChange(e.target.value.split('\n'))}
-            onInput={autosize}
-          />
-          {previewHtml && (
-            <div className="md-block-preview md-content" dangerouslySetInnerHTML={{ __html: previewHtml }} />
-          )}
-        </div>
-      );
-    }
     return (
       <div
         className={cn('md-block', !html.trim() && 'md-block-empty')}
@@ -530,14 +456,14 @@ function BlockEditor({ path, seg, editing, onStartEdit, onStopEdit, onChange }: 
           // 渲染态里链接/图片不该跳转（编辑态不导航），mermaid 工具条按钮除外。
           if ((e.target as HTMLElement).closest('button')) return;
           e.preventDefault();
-          onStartEdit();
+          onStartEdit({ x: e.clientX, y: e.clientY });
         }}
       >
         {!html.trim() && <span className="md-block-placeholder">点击开始输入…</span>}
         {label && (
           <div className="md-block-head">
             <span className="md-block-label">{label}</span>
-            <span className="md-block-head-hint">点击编辑</span>
+            <span className="md-block-head-hint">{rendering ? '渲染中…' : '点击编辑'}</span>
           </div>
         )}
         <div ref={displayRef} className="md-block-rendered" dangerouslySetInnerHTML={{ __html: html }} />
@@ -549,91 +475,19 @@ function BlockEditor({ path, seg, editing, onStartEdit, onStopEdit, onChange }: 
     <div className={cn('md-block md-block-editing')} data-kind={seg.cls}>
       <div className="md-block-head">
         <span className="md-block-label">{label || '编辑中'}</span>
-        <button
-          type="button"
-          className="md-block-done"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => void finish()}
-        >
+        <span className="md-block-head-hint">Esc 收起</span>
+        <button type="button" className="md-block-done" onClick={onStopEdit}>
           完成
         </button>
       </div>
-      <textarea
-        ref={taRef}
-        className="md-block-source"
+      <BlockSourceEditor
         value={src}
-        spellCheck={false}
-        onChange={(e) => onChange(e.target.value.split('\n'))}
-        onInput={autosize}
-        onCompositionStart={() => {
-          composingRef.current = true;
-        }}
-        onCompositionEnd={() => {
-          composingRef.current = false;
-          setTick((v) => v + 1);
-        }}
-        onBlur={() => void finish()}
-        onKeyDown={(e) => {
-          // 中文输入法组字过程中的按键不算
-          if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-          if (e.key === 'Escape') {
-            e.preventDefault();
-            void finish();
-            return;
-          }
-          if (e.key === 'Tab') {
-            e.preventDefault();
-            const ta = e.currentTarget;
-            const { selectionStart, selectionEnd, value } = ta;
-            const next = value.slice(0, selectionStart) + '  ' + value.slice(selectionEnd);
-            onChange(next.split('\n'));
-            requestAnimationFrame(() => {
-              ta.selectionStart = ta.selectionEnd = selectionStart + 2;
-              autosize();
-            });
-          }
-        }}
+        docPath={path}
+        autoFocus
+        caretAt={caretAt}
+        onChange={(v) => onChange(v.split('\n'))}
+        onFinish={onStopEdit}
       />
-      {live && (
-        <div className="md-block-preview-wrap">
-          <span className="md-block-preview-label">
-            实时预览{rendering ? ' · 渲染中…' : ''}
-          </span>
-          <div
-            ref={previewRef}
-            className="md-block-preview md-content"
-            dangerouslySetInnerHTML={{ __html: previewHtml }}
-          />
-        </div>
-      )}
-      {!live && (
-        <div className="md-block-preview-wrap">
-          <span className="md-block-preview-label">
-            该块不实时渲染{rendering ? ' · 渲染中…' : ''}（失焦或点「预览」后渲染一次）
-          </span>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-1.5 text-xs"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => {
-              setRendering(true);
-              void renderBlock().then((next) => {
-                if (next !== null) setPreviewHtml(next);
-                setRendering(false);
-              });
-            }}
-          >
-            预览
-          </Button>
-          {previewHtml && (
-            <div
-              className="md-block-preview md-content"
-              dangerouslySetInnerHTML={{ __html: previewHtml }}
-            />
-          )}
-        </div>
-      )}
     </div>
   );
 }

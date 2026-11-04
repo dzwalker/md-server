@@ -655,52 +655,71 @@
 }
 .md-block-done:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
 .md-block-done:focus-visible { outline: 2px solid var(--md-accent, #0969da); outline-offset: 1px; }
-.md-block-source {
-  display: block;
-  width: 100%;
-  box-sizing: border-box;
-  min-height: 34px;
-  margin: 0;
-  padding: 6px 9px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
-  line-height: 1.7;
-  tab-size: 2;
-  color: var(--md-fg, var(--foreground));
-  background: var(--md-code-bg, var(--muted));
-  border: 1px solid transparent;
-  border-radius: 7px;
-  outline: none;
-  resize: none;
-  overflow: hidden; /* 高度由 JS 自适应，不要默认滚动条 */
+/* ==== 单块源码编辑器（CodeMirror 6，见 specs/doc-editing/）====
+   编辑态**只有这一层**：没有「上面源码、下面预览」的分栏。标记符号在光标不在其中时隐藏，
+   格式按渲染形态呈现；光标进入就还原成原始 Markdown（Typora/Obsidian 的手感）。 */
+.md-block-cm { min-height: 24px; }
+.md-block-cm .cm-editor {
+  background: transparent;
+  font-size: inherit;
+  line-height: inherit;
+}
+.md-block-cm .cm-scroller {
+  font-family: inherit;
+  line-height: 1.75;
+  overflow: visible; /* 不要编辑器内部滚动条：整块跟着页面长高 */
+}
+.md-block-cm .cm-content {
+  padding: 2px 0;
   caret-color: var(--md-accent, #0969da);
 }
-.md-block-editing .md-block-source { border-color: color-mix(in srgb, var(--md-accent, #0969da) 40%, var(--border)); }
-.md-block-editing .md-block-source:focus {
-  border-color: var(--md-accent, #0969da);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--md-accent, #0969da) 16%, transparent);
+.md-block-cm .cm-line { padding: 0 2px; }
+.md-block-cm .cm-editor.cm-focused { outline: none; }
+.md-block-cm .cm-selectionBackground,
+.md-block-cm .cm-content ::selection {
+  background: color-mix(in srgb, var(--md-accent, #0969da) 20%, transparent) !important;
 }
-.md-block-source::selection { background: color-mix(in srgb, var(--md-accent, #0969da) 22%, transparent); }
-.md-block-preview-wrap {
-  margin-top: 8px;
-  padding-top: 6px;
-  border-top: 1px dashed color-mix(in srgb, var(--border) 75%, transparent);
+/* 光标所在行给一点点底色，避免「看不到自己在哪」 */
+.md-block-cm .cm-activeLine { background: color-mix(in srgb, var(--md-accent, #0969da) 4%, transparent); }
+
+/* ---- 行内格式：直接按渲染形态显示（标记符号由装饰藏起来） ---- */
+.md-block-cm .cm-md-strong { font-weight: 700; color: var(--md-heading, var(--foreground)); }
+.md-block-cm .cm-md-em { font-style: italic; }
+.md-block-cm .cm-md-inlinecode {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+  padding: 1px 3px;
+  border-radius: 4px;
+  background: var(--md-code-bg, var(--muted));
 }
-.md-block-preview-label {
-  display: inline-block;
-  margin-bottom: 4px;
-  font-size: 10px;
-  line-height: 1.5;
+.md-block-cm .cm-md-link { color: var(--md-accent, #0969da); text-decoration: underline; text-underline-offset: 2px; }
+.md-block-cm .cm-md-wikilink {
+  color: var(--md-accent, #0969da);
+  border-bottom: 1px dashed color-mix(in srgb, var(--md-accent, #0969da) 55%, transparent);
+  cursor: pointer;
+}
+.md-block-cm .cm-md-math-src { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; opacity: 0.85; }
+.md-block-cm .cm-md-math-widget { padding: 0 1px; }
+.md-block-cm .cm-md-image { max-height: 240px; max-width: 100%; vertical-align: middle; border-radius: 4px; }
+.md-block-cm .cm-md-image-alt { font-size: 0.9em; color: var(--md-muted, var(--muted-foreground)); }
+
+/* ---- 行级格式 ---- */
+.md-block-cm .cm-md-heading { font-weight: 700; color: var(--md-heading, var(--foreground)); }
+.md-block-cm .cm-md-h1 { font-size: 1.7em; line-height: 1.3; margin-top: 0.5em; }
+.md-block-cm .cm-md-h2 { font-size: 1.4em; line-height: 1.35; margin-top: 0.45em; }
+.md-block-cm .cm-md-h3 { font-size: 1.2em; }
+.md-block-cm .cm-md-h4 { font-size: 1.05em; }
+.md-block-cm .cm-md-h5,
+.md-block-cm .cm-md-h6 { font-size: 1em; }
+.md-block-cm .cm-md-quote {
+  border-left: 3px solid var(--md-quote-border, var(--border));
+  padding-left: 10px;
   color: var(--md-muted, var(--muted-foreground));
-  user-select: none;
 }
-.md-block-preview {
-  padding: 4px 8px;
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--md-accent, #0969da) 3%, transparent);
-}
-/* 预览区里的块不要 content-visibility 的估值高度：它每次输入都在变，估值会跳。 */
-.md-block-preview > * { content-visibility: visible; }
+.md-block-cm .cm-md-codeblock { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; }
+.md-block-cm .cm-md-htmlblock { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; opacity: 0.9; }
+.md-block-cm .cm-md-table { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; }
+.md-block-cm .cm-md-hr { color: var(--md-muted, var(--muted-foreground)); }
 .md-editor-source {
   display: block;
   width: 100%;

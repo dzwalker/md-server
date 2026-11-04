@@ -33,5 +33,5 @@ specs/<feature-slug>/
 - `set-scoped-tabs/`：已打开的文件跟随当前「空间 set」——切走时该 set 的 tab 整体关闭、切回时重新打开，按 set 分槽持久化（`md-open-tabs-by-set`），旧单键一次性迁移（2026-10-08）。
 - `raw-asset-links/`：正文里指向本地非 md 文件的相对链接（互动 HTML / PDF / CSV…）一点即开——服务端按文档目录改写为绝对 `/api/asset/*`，并扩充 `ASSET_MIME`（2026-10-12）。
 - `outlinks/`：出链面板去重 + 引用次数（`×N`）+ 点击跳转——`GET /api/outlinks/*` 响应从 `string[]` 改为 `{target,count}[]`，按正文首现排序；悬空双链灰显不可点（2026-10-19）。
-- `doc-editing/`：正文编辑——块级就地编辑 + 活跃块服务端实时预览（表格/代码/图表/公式/原始 HTML 只显示源码），整篇保存带 mtime 乐观锁；资源管理器右键「新建 Markdown 文件 / 重命名」（`/api/docs`、`/api/docs/create`、`/api/docs/rename`、`/api/render-block`；写盘底座抽成 `src/file-write.ts`）（2026-11-03）。
+- `doc-editing/`：正文编辑——**单栏**编辑器（CodeMirror 6，按需动态加载）：空闲块显示服务端渲染结果、点进去原地变成带格式装饰的源码（表格/代码/图表/公式/原始 HTML 光标进入才显示源码），整篇保存带 mtime 乐观锁；资源管理器右键「新建 Markdown 文件 / 重命名」（`/api/docs`、`/api/docs/create`、`/api/docs/rename`、`/api/render-block`；写盘底座抽成 `src/file-write.ts`）（2026-11-03）。
 - `glossary/`：术语表——文件名约定（含「术语表」/`glossary`）、`## 术语 + 别名 + 定义`格式、按空间 set 生效、正文自动下划线 + 悬浮定义（长词优先/英文全词/前 3 条），`/api/render` 与 `/api/stat` 新增 glossary 字段（2026-10-26）。

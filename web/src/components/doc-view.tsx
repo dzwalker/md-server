@@ -521,7 +521,8 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     if (!editing) return;
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
-      const inField = !!target?.closest?.('textarea, input');
+      // 源码编辑器（CodeMirror）或原生输入框里的 Esc 只收当前块，不取消整篇编辑。
+      const inField = !!target?.closest?.('textarea, input, .cm-editor');
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         void onSaveEditor();

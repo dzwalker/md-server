@@ -36,7 +36,9 @@ whenToUse: 需要理解或修改 md-server 结构时（web/ 前端 React 工程�
 | 弹层 | `src/components/opened-switcher.tsx` | ⌘O：已打开文档看板，一列 = 一个一级目录，`←→↑↓` 导航 + Enter 打开 |
 | 侧栏 | `src/components/sidebar*.tsx` | 资源管理器（react-arborist，文件树右键菜单：复制文件名/复制完整路径/下载/重命名，目录节点「新建 Markdown 文件」，见 `specs/explorer-context-menu/`、`specs/doc-editing/`）/ 已打开 / 标签 / 收藏 / 空间 / 设置 |
 | 主区 | `src/components/doc-view.tsx` | 文档头（编辑 / 收藏 / 下载 / 保存·取消）+ tab 栏（dnd-kit 拖拽）+ 正文渲染（**命令式注入**：`{el, key}` 决定何时整篇重写，笔记保存走局部替换）+ TOC + 正文右键笔记菜单 / 就地编辑 / 删除确认；编辑态：渲染区 `display:none` + `DocEditor` 接管、暂停轮询、`⌘S`/`Esc`、未保存守卫 |
-| 主区 | `src/components/doc-editor.tsx` | 块编辑器（见 `specs/doc-editing/`）：按块行区间切成「段」（block / gap / 源码），渲染态 ↔ 源码态；活跃块 250ms 防抖调 `/api/render-block` 出实时预览；保存走 `/api/docs`（409 → 覆盖保存 / 重新载入） |
+| 主区 | `src/components/doc-editor.tsx` | 正文编辑器（见 `specs/doc-editing/`）：按块行区间切成「段」（block / gap / 源码）；**单栏**——空闲块显示服务端渲染结果，点进去原地换成带格式装饰的源码编辑器（没有上下分栏）；保存走 `/api/docs`（409 → 覆盖保存 / 重新载入） |
+| 编辑器 | `src/components/block-source-editor.tsx` | 单块源码编辑器的 React 包装：进入编辑态才 `import()` CodeMirror；初始值只取一次（受控回写会打断输入法/撤销栈） |
+| 编辑器 | `src/lib/md-codemirror.ts` | CodeMirror 6 单栏 Markdown 编辑器：Lezer 语法树 + 正则兜底做行内装饰（粗体/斜体/行内代码/链接/双链/行内公式/图片/标题/引用），光标进入即还原源码；列表回车续行、Tab 缩进、Esc 收起；独立 chunk（约 492KB） |
 | 弹层 | `src/components/doc-name-dialog.tsx` | 「新建 / 重命名」共用的命名对话框（聚焦全选、`.md` 后缀、Enter/Esc、失败红字不关闭） |
 | 库 | `src/lib/api.ts`, `lib/types.ts` | HTTP API 封装与响应类型（新增接口同步这两处） |
 | 库 | `src/lib/download.ts`, `lib/clipboard.ts` | 下载 md 原文（`downloadDocByPath`，文档头与右键菜单共用）/ 复制到剪贴板（含非安全上下文降级） |
@@ -47,7 +49,7 @@ whenToUse: 需要理解或修改 md-server 结构时（web/ 前端 React 工程�
 | 库 | `src/lib/scroll-anchor.ts` | 正文整篇重注入时的滚动位置保持（content-visibility 估值漂移的补偿，见 `specs/notes/plan.md` §5） |
 
 - 依赖 API：`/api/tree` `/api/files` `/api/files/*` `/api/render/*`（含 `glossary`）`/api/stat`（含 `glossaryVersion`）`/api/notes`（POST，写笔记行）`/api/docs`（POST 整篇保存）`/api/docs/create`（POST 新建）`/api/docs/rename`（POST 改名）`/api/render-block`（POST 块级预览，只读）`/api/search` `/api/search-semantic` `/api/recent` `/api/tags` `/api/backlinks/*` `/api/outlinks/*` `/api/graph` `/api/favorites` `/api/todos` `/api/sets` `/api/status` `/api/asset/*`
-- 渲染库：按需加载 `/media/*`（katex / mermaid / highlight）
+- 渲染库：按需加载 `/media/*`（katex / mermaid / highlight）；编辑器：`web/src/lib/md-codemirror.ts` 只在进入编辑态时动态加载（`md-codemirror-*.js`）
 
 ### 基础设施
 
