@@ -12,6 +12,7 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirro
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxTree } from '@codemirror/language';
 import { ensureKatex } from './markdown-extras';
+import { assetUrlForDir } from './asset-url';
 
 /**
  * 块级 Markdown 单栏编辑器（CodeMirror 6，**按需动态加载**）。
@@ -97,19 +98,6 @@ class ImageWidget extends WidgetType {
   ignoreEvent() {
     return true;
   }
-}
-
-/** 相对路径 → /api/asset/*（与服务端 render.ts 的改写口径一致）。 */
-function resolveImageSrc(src: string, baseDir: string): string {
-  if (/^(https?:|data:|#|\/\/)/i.test(src) || src.startsWith('/')) return src;
-  const parts = (baseDir + '/' + src).split('/');
-  const out: string[] = [];
-  for (const p of parts) {
-    if (!p || p === '.') continue;
-    if (p === '..') out.pop();
-    else out.push(p);
-  }
-  return '/api/asset/' + out.join('/');
 }
 
 /**
@@ -240,7 +228,7 @@ function buildDecorations(view: EditorView, baseDir: string): DecorationSet {
           replaces.push({
             from,
             to,
-            dec: Decoration.replace({ widget: new ImageWidget(resolveImageSrc(m[2], baseDir), m[1]) }),
+            dec: Decoration.replace({ widget: new ImageWidget(assetUrlForDir(baseDir, m[2]), m[1]) }),
           });
         }
         return;

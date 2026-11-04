@@ -99,3 +99,15 @@
 - [x] 文档头「保存」右侧的模式切换（分块 / 源码 / Muya / Milkdown）。
 - [x] 实测保存代价：Muya 会把表格单元格按列宽补空格；Crepe 会把 `-` 列表改 `*`、`| --- |` 改 `| - |`。已写入 plan.md §3.2.1 作为决策依据。
 - [x] 门禁：`tsc` 两端、`npm test` 132、`web build` 通过。
+
+## T12 frontmatter 独立 + Crepe 主题/配置 + md-server 方言 + 图片上传（2026-11-04）
+
+- [x] 编辑态拆出 frontmatter：默认折叠 `<details>` + textarea；保存拼回时保留分隔符与正文前空行。
+- [x] Crepe 主题变量映射到 `--md-*`（字体/字号/行高/强调色/代码底色/引用与表格），变量挂在 `.milkdown` 上才生效。
+- [x] 进入编辑态默认 Milkdown。
+- [x] Crepe 配置：`placeholder`（中文占位）、`latex.katexOptions`（throwOnError:false）、`image-block.proxyDomURL`/`onUpload`/`onImageLoadError`、`code-mirror` 中文预览按钮。
+- [x] `/` 菜单与浮动工具栏新增「双链 `[[ ]]`」「笔记行 `> note:`」（`/` 触发先清空当前块文字）。
+- [x] 后端 `src/upload.ts` + `POST /api/asset/upload` + 5 个单测（MIME 决定扩展名、415/400/413、404 不建目录、唯一文件名、属主对齐）。
+- [x] 前端 `api.uploadImage`、`lib/asset-url.ts`（编辑器内相对路径 → `/api/asset`，CodeMirror 与 Crepe 共用）。
+- [x] 实测：图片显示为 `/api/asset/space1/assets/demo.png`；`/` 菜单含双链/笔记行且能插入；上传后文件 `dev:dev 644`。
+- [x] 门禁：tsc 两端、`npm test` 137 全绿、web build 通过。

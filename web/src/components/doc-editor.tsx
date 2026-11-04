@@ -198,6 +198,50 @@ function segmentsText(segs: Segment[]): string {
   return segs.map((s) => s.src.join('\n')).join('\n');
 }
 
+/** 文档头 YAML frontmatter 的拆分结果（分隔符原样保留，正文单独给编辑器）。 */
+interface FrontmatterPart {
+  /** 是否有 frontmatter（必须是文件第一行 `---` 且有闭合行）。 */
+  has: boolean;
+  /** 开分隔符（固定 `---`）。 */
+  open: string;
+  /** 闭分隔符（`---` 或 `...`，原样保留）。 */
+  close: string;
+  /** 分隔符之间的 YAML 原文（编辑框里的内容）。 */
+  inner: string;
+}
+
+/**
+ * 把文档拆成「文档信息（frontmatter）」与「正文」。
+ *
+ * 编辑态里 frontmatter 不进任何编辑器（Muya/Crepe/CM6 都会把它当普通文本或吃掉），
+ * 而是单独渲染成一个默认折叠的区域，点开是一个普通 textarea。
+ */
+export function splitFrontmatter(text: string): { fm: FrontmatterPart; body: string } {
+  const none: FrontmatterPart = { has: false, open: '---', close: '---', inner: '' };
+  if (!text.startsWith('---\n') && text !== '---') return { fm: none, body: text };
+  const lines = text.split('\n');
+  const closeIdx = lines.findIndex((l, i) => i > 0 && (l === '---' || l === '...'));
+  if (closeIdx < 0) return { fm: none, body: text };
+  return {
+    fm: {
+      has: true,
+      open: '---',
+      close: lines[closeIdx],
+      inner: lines.slice(1, closeIdx).join('\n'),
+    },
+    body: lines.slice(closeIdx + 1).join('\n'),
+  };
+}
+
+/** 把「文档信息」+「正文」拼回整篇源码（分隔符保留原样）。 */
+export function joinFrontmatter(fm: FrontmatterPart, inner: string, body: string): string {
+  if (!fm.has) return body;
+  // frontmatter 与正文之间保留一个空行：富文本编辑器（remark/turndown）序列化时
+  // 会把正文开头的空行吃掉，这里拼回时统一补一个，避免每存一次就少一个空行。
+  const gap = body === '' || body.startsWith('\n') ? '' : '\n';
+  return `${fm.open}\n${inner}\n${fm.close}\n${gap}${body}`;
+}
+
 export interface DocEditorHandle {
   /** 保存：force=true 时不带 mtime（用户确认「覆盖保存」）。失败会抛错。 */
   save: (opts?: { force?: boolean }) => Promise<void>;
@@ -225,6 +269,10 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
   const [active, setActive] = useState<{ index: number; caret?: { x: number; y: number } } | null>(null);
   const [sourceText, setSourceText] = useState('');
   const [richText, setRichText] = useState('');
+  /** frontmatter 拆分结果（open/close 分隔符 + 是否有） */
+  const fmRef = useRef<FrontmatterPart>({ has: false, open: '---', close: '---', inner: '' });
+  /** 编辑框里的 YAML 原文（不含分隔线） */
+  const [fmInner, setFmInner] = useState('');
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(false);
   const eolRef = useRef('\n');
@@ -243,14 +291,17 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
       const raw = await api.rawFile(path);
       const eol = raw.content.includes('\r\n') ? '\r\n' : '\n';
       const text = raw.content.replace(/\r\n/g, '\n');
-      const r = await api.renderBlock(path, text);
+      const { fm, body } = splitFrontmatter(text);
+      const r = await api.renderBlock(path, body);
       eolRef.current = eol;
       mtimeRef.current = raw.mtimeMs;
       originalRef.current = text;
-      setSegments(buildSegments(text, r.html));
-      setSourceText(text);
-      setRichText(text);
-      lastGoodRef.current = text;
+      fmRef.current = fm;
+      setFmInner(fm.inner);
+      setSegments(buildSegments(body, r.html));
+      setSourceText(body);
+      setRichText(body);
+      lastGoodRef.current = body;
       setActive(null);
       setConflict(false);
     } catch (e) {
@@ -264,11 +315,15 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
     void load();
   }, [load]);
 
-  const text = useMemo(() => {
+  /** 正文（不含 frontmatter）：各模式各自持有 */
+  const bodyText = useMemo(() => {
     if (mode === 'blocks') return segments ? segmentsText(segments) : '';
     if (mode === 'source') return sourceText;
     return richText;
   }, [mode, segments, sourceText, richText]);
+
+  /** 整篇源码 = frontmatter + 正文（保存与脏判断都用它） */
+  const text = useMemo(() => joinFrontmatter(fmRef.current, fmInner, bodyText), [fmInner, bodyText]);
 
   const dirty = !loading && !loadError && text !== originalRef.current;
   const textRef = useRef(text);
@@ -336,15 +391,17 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
 
   /** 取保存用的整篇源码：富文本模式同步 flush 一次，避免防抖丢最后几个字。 */
   const currentContent = useCallback(() => {
-    if (mode === 'blocks' || mode === 'source') return text;
-    try {
-      const flushed = richRef.current?.flush?.();
-      if (typeof flushed === 'string' && flushed.length) return flushed;
-    } catch {
-      /* ignore */
+    let body = bodyText;
+    if (mode === 'muya' || mode === 'milkdown') {
+      try {
+        const flushed = richRef.current?.flush?.();
+        if (typeof flushed === 'string' && flushed.length) body = flushed;
+      } catch {
+        /* ignore */
+      }
     }
-    return richText;
-  }, [mode, text, richText]);
+    return joinFrontmatter(fmRef.current, fmInner, body);
+  }, [mode, bodyText, fmInner]);
 
   const doSave = useCallback(
     async (opts?: { force?: boolean }) => {
@@ -405,6 +462,22 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
         </div>
       )}
 
+      {fmRef.current.has && (
+        <details className="md-frontmatter-edit">
+          <summary>
+            <span className="md-frontmatter-edit-label">文档信息</span>
+            <span className="md-frontmatter-edit-hint">YAML（点击展开编辑）</span>
+          </summary>
+          <textarea
+            className="md-frontmatter-edit-input"
+            value={fmInner}
+            spellCheck={false}
+            rows={Math.min(12, Math.max(2, fmInner.split('\n').length))}
+            onChange={(e) => setFmInner(e.target.value)}
+          />
+        </details>
+      )}
+
       {mode === 'source' ? (
         <textarea
           className="md-editor-source"
@@ -418,7 +491,7 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
       ) : mode === 'muya' ? (
         <MuyaEditor key="muya" ref={richRef} value={richText} onChange={onRichChange} />
       ) : mode === 'milkdown' ? (
-        <MilkdownEditor key="milkdown" ref={richRef} value={richText} onChange={onRichChange} />
+        <MilkdownEditor key="milkdown" ref={richRef} value={richText} docPath={path} onChange={onRichChange} />
       ) : (
         <div className="md-editor-blocks md-content">
           {(segments ?? []).map((seg, i) =>

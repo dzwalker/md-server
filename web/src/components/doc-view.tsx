@@ -173,7 +173,8 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   const editorRef = useRef<DocEditorHandle | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
   // 编辑器的四种模式（文档头右侧切换）：分块 / 源码 / Muya / Milkdown
-  const [editorMode, setEditorMode] = useState<EditorMode>('blocks');
+  // 进入编辑态默认用 Milkdown（Crepe），其它模式按需切换。
+  const [editorMode, setEditorMode] = useState<EditorMode>('milkdown');
   const editing = !!activeDoc && editingPath === activeDoc;
 
   // 正文整篇重注入时的滚动锚点：长文档里 content-visibility 的「记忆尺寸」会随替换丢失，
@@ -555,7 +556,7 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   useEffect(() => {
     if (editing) {
       closeActiveNoteEditor();
-      setEditorMode('blocks');
+      setEditorMode('milkdown');
     }
   }, [editing]);
 
