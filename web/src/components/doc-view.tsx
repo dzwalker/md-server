@@ -781,7 +781,7 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
               size="sm"
               className="h-8"
               onClick={() => void onSaveEditor()}
-              disabled={savingEdit}
+              disabled={savingEdit || !editingDirty}
               title="保存到磁盘（⌘S）"
             >
               {savingEdit ? '保存中…' : '保存'}
