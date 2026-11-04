@@ -791,3 +791,105 @@
 .md-rich-muya .muya-editor {
   min-height: 60vh;
 }
+
+/* ==== Milkdown Crepe：把主题变量映射到 md-server 的内容主题上（--md-*）====
+   Crepe 的配色/字号全部走 --crepe-* 变量，这里统一覆盖成站内变量，
+   于是编辑器的字体、字号、强调色、代码块底色、深浅色都跟阅读态一致。 */
+.md-rich-milkdown .milkdown {
+  /* 变量必须挂在 .milkdown 上：Crepe 主题把 --crepe-* 定义在 .milkdown（内层节点），
+     定义在外层 wrapper 会被它覆盖。 */
+  --crepe-color-background: transparent;
+  --crepe-color-on-background: var(--md-fg, var(--foreground));
+  --crepe-color-surface: var(--md-bg, var(--background));
+  --crepe-color-surface-low: color-mix(in srgb, var(--md-bg, var(--background)) 92%, var(--md-fg, var(--foreground)));
+  --crepe-color-on-surface: var(--md-fg, var(--foreground));
+  --crepe-color-on-surface-variant: var(--md-muted, var(--muted-foreground));
+  --crepe-color-outline: var(--border);
+  --crepe-color-primary: var(--md-accent, #0969da);
+  --crepe-color-secondary: color-mix(in srgb, var(--md-accent, #0969da) 16%, transparent);
+  --crepe-color-on-secondary: var(--md-fg, var(--foreground));
+  --crepe-color-inverse: var(--md-fg, var(--foreground));
+  --crepe-color-on-inverse: var(--md-bg, var(--background));
+  --crepe-color-inline-code: var(--md-accent, #0969da);
+  --crepe-color-error: var(--destructive, #dc2626);
+  --crepe-color-hover: color-mix(in srgb, var(--md-accent, #0969da) 10%, transparent);
+  --crepe-color-selected: color-mix(in srgb, var(--md-accent, #0969da) 18%, transparent);
+  --crepe-color-inline-area: color-mix(in srgb, var(--md-muted, #888) 14%, transparent);
+  --crepe-base-font-size: 15px;
+  --crepe-font-default: "Geist Variable", -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --crepe-font-title: var(--crepe-font-default);
+  --crepe-font-code: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --crepe-shadow-1: 0 1px 4px rgb(0 0 0 / 8%);
+  --crepe-shadow-2: 0 4px 16px rgb(0 0 0 / 12%);
+  max-width: none;
+  margin: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.md-rich-milkdown .ProseMirror {
+  padding: 0;
+  line-height: 1.7;
+  color: var(--md-fg, var(--foreground));
+}
+/* 表格/引用/代码块跟随内容主题（Crepe 的默认边距比阅读态大，略收一点） */
+.md-rich-milkdown .ProseMirror table { border-collapse: collapse; }
+.md-rich-milkdown .ProseMirror th,
+.md-rich-milkdown .ProseMirror td {
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+}
+.md-rich-milkdown .ProseMirror pre {
+  background: var(--md-code-bg, var(--muted));
+  border-radius: 6px;
+}
+.md-rich-milkdown .ProseMirror blockquote {
+  border-left: 4px solid var(--md-quote-border, var(--border));
+  background: var(--md-quote, var(--muted));
+  padding: 8px 14px;
+  margin: 0.6em 0;
+}
+
+/* ==== 编辑态：文档信息（frontmatter）独立折叠区（不交给编辑器）==== */
+.md-frontmatter-edit {
+  margin: 0 0 12px;
+  padding: 7px 12px 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--md-muted, var(--muted-foreground)) 8%, transparent);
+  font-size: 12px;
+  color: var(--md-muted, var(--muted-foreground));
+}
+.md-frontmatter-edit > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+.md-frontmatter-edit > summary::-webkit-details-marker { display: none; }
+.md-frontmatter-edit > summary::before {
+  content: "▸";
+  font-size: 10px;
+  transition: transform 0.12s ease;
+}
+.md-frontmatter-edit[open] > summary::before { transform: rotate(90deg); }
+.md-frontmatter-edit-label { font-weight: 600; color: var(--md-fg, var(--foreground)); }
+.md-frontmatter-edit-hint { opacity: 0.65; font-size: 11px; }
+.md-frontmatter-edit-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  padding: 8px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--md-fg, var(--foreground));
+  background: var(--md-bg, var(--background));
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 6px;
+  outline: none;
+  resize: vertical;
+}
+.md-frontmatter-edit-input:focus { border-color: var(--md-accent, #0969da); }
