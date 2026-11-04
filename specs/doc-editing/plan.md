@@ -94,9 +94,15 @@ segments = [ {kind:'gap', src:['','']}, {kind:'block', cls:'text', src:[...], ht
 | Muya | `@muyajs/core`（MarkText 内核） | 按需 chunk（约 1.1MB + 依赖） | turndown：HTML→markdown | 表格单元格会被补齐空格（`| A | B |` → `| A   | B   |`），列表符号与正文基本保留 |
 | Milkdown | `@milkdown/crepe`（官方开箱封装） | 按需 chunk（约 1.5MB） | remark 序列化 | 无序列表 `-` → `*`、表格分隔行 `| --- |` → `| - |`、代码块空行等会被规范化 |
 
+### 3.2.2 frontmatter 与图片（2026-11-04）
+
+- **frontmatter**：`splitFrontmatter` / `joinFrontmatter`（doc-editor 内）把文档拆成「YAML 头 + 正文」；编辑器只拿正文，头渲染成默认折叠的 `<details>`，点开是 textarea；拼回时保留原分隔符（`---`/`...`）并在正文前补一个空行（富文本序列化会吃掉它）。
+- **图片**：新增 `src/upload.ts` 与 `POST /api/asset/upload`（二进制 body，query 带 `path`/`name`）：扩展名按 MIME 决定、10MB 上限、非图片 415、写进 `<文档目录>/assets/`、新文件/新目录属主对齐文档目录；前端 `api.uploadImage` → Crepe `imageBlock.onUpload` 返回**相对路径**（markdown 可移植），`proxyDomURL` 负责显示时改写成 `/api/asset/*`。
+- **Crepe 配置 key 必须是 `CrepeFeature` 的枚举值**（`'image-block'`/`'block-edit'`…），写驼峰属性名会被静默忽略（踩过一次）。
+
 - 三条富文本路径都是**动态 import**：只有切到该模式才加载，阅读/分块编辑不受影响。
 - 富文本模式的价值：验证「完全看不见 markdown」的手感（Crepe 额外带 `/` 插入、块手柄、表格工具栏、LaTeX）。
-- 结论：作为**对照实验**保留；默认仍用「分块」，因为笔记库的 md 需要和其他编辑器互操作、且要能逐字 diff。
+- 结论：作为**对照实验**保留。**2026-11-04 起默认改成 Milkdown**（用户明确接受“笔记库不再追求逐字 diff”）。
 
 ### 3.3 文档视图（`components/doc-view.tsx`）
 

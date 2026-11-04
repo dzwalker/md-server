@@ -113,6 +113,26 @@ export const api = {
   saveDoc: (req: DocSaveRequest) => post<DocSaveResponse>('/api/docs', req),
   createDoc: (req: DocCreateRequest) => post<DocCreateResponse>('/api/docs/create', req),
   renameDoc: (req: DocRenameRequest) => post<DocRenameResponse>('/api/docs/rename', req),
+  // 编辑态图片上传：落到文档目录的 assets/，返回相对路径（写进 markdown）与 urlPath。
+  uploadImage: async (docPath: string, file: File): Promise<{ relPath: string; urlPath: string; size: number }> => {
+    const qs = new URLSearchParams({ path: docPath, name: file.name || 'image' });
+    const res = await fetch(`/api/asset/upload?${qs.toString()}`, {
+      method: 'POST',
+      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      body: file,
+    });
+    if (!res.ok) {
+      let msg = `上传失败（${res.status}）`;
+      try {
+        const b = (await res.json()) as { error?: string };
+        if (b?.error) msg = b.error;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(msg);
+    }
+    return res.json() as Promise<{ relPath: string; urlPath: string; size: number }>;
+  },
   // 块级实时预览（只读）：把一块源码按该文档的目录/术语表上下文渲染成 HTML。
   renderBlock: (path: string, markdown: string) =>
     post<RenderBlockResponse>('/api/render-block', { path, markdown }),

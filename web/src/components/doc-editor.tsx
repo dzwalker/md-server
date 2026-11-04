@@ -491,7 +491,7 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
       ) : mode === 'muya' ? (
         <MuyaEditor key="muya" ref={richRef} value={richText} onChange={onRichChange} />
       ) : mode === 'milkdown' ? (
-        <MilkdownEditor key="milkdown" ref={richRef} value={richText} onChange={onRichChange} />
+        <MilkdownEditor key="milkdown" ref={richRef} value={richText} docPath={path} onChange={onRichChange} />
       ) : (
         <div className="md-editor-blocks md-content">
           {(segments ?? []).map((seg, i) =>

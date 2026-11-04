@@ -11,6 +11,7 @@ import { renderMarkdown } from './render.js';
 import { glossaryForDoc, glossaryVersionForDoc, invalidateGlossaryFileCache } from './glossary.js';
 import { applyNoteToFile, toNoteOpInput, type NoteOpInput } from './notes.js';
 import { saveDocFile, createDocFile, renameDocFile, validateDocBaseName, docFileName } from './docs.js';
+import { saveDocImage } from './upload.js';
 import { WriteError } from './file-write.js';
 import { rebuildIndex, syncIndex, removeIndexPrefixInBatches, searchFiles, listTags, indexStats, backlinks, outlinks, graph, listFavorites, setFavorite, removeFavorite, renameFavorite, listTodos, listDueTasks, indexFiles, indexFilesInBatches, removeIndexPaths, removeIndexPrefix, listFileSummaries, listFilesMeta, getFileMeta, listRecentFiles, listNotes, truncateWal } from './index-db.js';
 import { startMcp } from './mcp.js';
@@ -23,6 +24,10 @@ const app = Fastify({ logger: false });
 // 响应压缩：/api/tree 431KB→~64KB、/api/render 233KB→~44KB、前端 bundle 569KB→~150KB。
 // 注意：必须 await，否则插件挂到各路由上的 onSend 钩子来不及生效（压缩会静默失效）。
 await app.register(fastifyCompress, { global: true, encodings: ['br', 'gzip'], threshold: 1024 });
+// 图片上传的二进制请求体：Fastify 默认不认识 image/* 与 octet-stream，这里按 Buffer 收。
+app.addContentTypeParser(/^image\//, { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
+app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
+
 // 静态媒体资源（katex / mermaid / highlight）——始终可用
 await app.register(fastifyStatic, { root: path.join(process.cwd(), 'public', 'media'), prefix: '/media/', decorateReply: false, maxAge: '7d' });
 // 前端构建产物（web/dist）——生产环境
@@ -297,6 +302,24 @@ app.get('/api/asset/*', async (req, reply) => {
   if (!mime) return reply.code(415).send('unsupported type');
   if (!fs.existsSync(fsPath) || !fs.statSync(fsPath).isFile()) return reply.code(404).send('not found');
   return reply.type(mime).send(fs.readFileSync(fsPath));
+});
+
+// 编辑态图片上传（粘贴 / 拖拽）：落到文档所在目录的 assets/，返回相对路径给 markdown 用。
+// 详见 specs/doc-editing/spec.md「图片上传」一节。
+app.post('/api/asset/upload', { bodyLimit: 11 * 1024 * 1024 }, async (req, reply) => {
+  const { path: docPath = '', name = '' } = (req.query as any) || {};
+  const p = String(docPath || '');
+  const fsPath = p ? resolveUrlPath(p) : null;
+  if (!fsPath) return reply.code(400).send({ error: '非法或缺失的文档路径 path' });
+  const body = req.body;
+  if (!Buffer.isBuffer(body)) return reply.code(400).send({ error: '需要二进制请求体（图片）' });
+  try {
+    const r = saveDocImage(fsPath, p, String(req.headers['content-type'] || ''), body, String(name || ''));
+    return { ok: true, ...r };
+  } catch (e) {
+    if (e instanceof WriteError) return reply.code(e.status).send({ error: e.message });
+    throw e;
+  }
 });
 
 app.post('/api/reindex', async () => { rebuildIndex(); bumpVersion(); });
