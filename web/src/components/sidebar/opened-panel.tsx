@@ -40,14 +40,19 @@ export function OpenedPanel() {
             {docs.map((d) => (
               <div
                 key={d.path}
-                className={cn('group flex items-center', d.path === activeDoc && 'bg-accent')}
+                className={cn(
+                  // 悬浮高亮放在**整行**上：只高亮标题按钮的话，右侧 × 那格仍是侧栏底色
+                  // （浅色主题是 250 的近白），看起来就像 × 上贴了一块白底。
+                  'group flex items-center hover:bg-accent',
+                  d.path === activeDoc && 'bg-accent',
+                )}
               >
                 <button
                   type="button"
                   onClick={() => activateDoc(d.path)}
                   title={d.title}
                   className={cn(
-                    'min-w-0 flex-1 truncate py-1 pl-6 pr-1 text-left text-sm hover:bg-accent',
+                    'min-w-0 flex-1 truncate py-1 pl-6 pr-1 text-left text-sm',
                     d.path === activeDoc && 'font-medium text-accent-foreground',
                   )}
                 >

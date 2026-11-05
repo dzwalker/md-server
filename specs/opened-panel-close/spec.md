@@ -33,6 +33,7 @@
 
 - [x] Given `lark-archive` 下已打开 2 篇文档，Then 分组头右侧有 × 按钮，`title`/`aria-label` 写明「关闭「lark-archive」下全部 2 篇文档」。
 - [x] Given 鼠标不在某文档行上，Then 该行 × 的 `opacity` 为 0（不干扰阅读）；悬浮该行后变为 1。
+- [x] Given 悬浮在**非当前**文档行上，Then 整行底色一致（浅色 `#f5f5f5` / 暗色 `#262626`），× 所在格不出现侧栏底色的白/黑块。
 - [x] Given 正在看 README（同组还有 AGENTS），When 点 README 行的 ×，Then 只剩 AGENTS，且 AGENTS 成为当前文档，tab 栏同步只剩一个。
 - [x] Given `lark-archive` 下已打开 1 篇，When 点分组头的 ×，Then 该组清空、侧栏显示「暂无打开的文档」、`md-open-tabs-by-set` 里该 set 的 `openDocs` 为空。
 - [x] Given 正在编辑某篇且未保存，When 关闭它（单个或整组），Then 先弹确认，取消则不关。
@@ -46,6 +47,9 @@
   - 组头 × 可见，文案带篇数；行内 × 悬浮前 `opacity:0`、悬浮后 `1`；
   - 单篇关闭 README 后：`openDocs=['/lark-archive/AGENTS.md']`、`activeDoc` 回落到 AGENTS、tab 栏剩 1 个；
   - 组头 × 后：`openDocs=[]`、`activeDoc=null`、显示「暂无打开的文档」，`md-open-tabs-by-set` 落盘一致。
+- 2026-11-05 修：首版把 `hover:bg-accent` 放在标题按钮上，导致悬浮时只有标题区变色，右侧 × 那格仍是侧栏底色
+  （浅色 `oklch(0.985)` ≈ `#fafafa`）→ 看起来像 × 上贴了一块白底；改为把悬浮底色放在**整行** `<div>` 上，
+  标题按钮不再自带 hover 底色。实测整行像素一致（浅色 `(245,245,245)` 贯穿到最右、暗色 `(38,38,38)`）。
 - 2026-11-05 **已上线**：随「阅读态列表样式」一起 `docker compose up -d --build`（manifest `sha256:b57184b6…`），
   线上容器内重跑同一套无头 Chrome 检查：组头 × 可见、行内 × 悬浮前 `opacity:0` / 悬浮后 `1`、单篇关闭后
   `openDocs=['/lark-archive/AGENTS.md']`、组关闭后 `openDocs=[]` 且显示「暂无打开的文档」。
