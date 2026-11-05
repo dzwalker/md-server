@@ -333,7 +333,7 @@ app.get('/api/asset/r2/*', async (req, reply) => {
   if (!isSafeR2Key(key, cfg.prefix)) return reply.code(400).send({ error: '非法的图片 key' });
   try {
     const obj = await getR2Object(cfg, key);
-    reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+    // 缓存头统一由 onSend 钩子按 URL 设置（见文件末尾）
     if (obj.contentType) reply.header('Content-Type', obj.contentType);
     if (obj.contentLength) reply.header('Content-Length', String(obj.contentLength));
     return reply.send(obj.body as any);
@@ -453,6 +453,8 @@ app.addHook('onSend', async (req, reply) => {
   const url = req.raw.url || '';
   if (url.startsWith('/assets/')) reply.header('Cache-Control', 'public, max-age=31536000, immutable');
   else if (url.startsWith('/media/')) reply.header('Cache-Control', 'public, max-age=604800');
+  // R2 图片代理：对象 key 带 uuid、内容不可变，可以长缓存（否则每张图都回源）
+  else if (url.startsWith('/api/asset/r2/')) reply.header('Cache-Control', 'public, max-age=31536000, immutable');
   else reply.header('Cache-Control', 'no-cache');
 });
 
