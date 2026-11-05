@@ -29,9 +29,34 @@ type DocsAction =
   | { type: 'open'; path: string; title: string; query: string | null }
   | { type: 'activate'; path: string }
   | { type: 'close'; path: string }
+  | { type: 'closeMany'; paths: string[] }
   | { type: 'reorder'; from: number; to: number }
   | { type: 'rename'; from: string; to: string; title: string }
   | { type: 'hydrate'; docs: DocsState };
+
+/**
+ * 关闭若干篇文档（单个 / 整组共用）：只剩「挑哪篇接任当前文档」这一件事。
+ * 接任规则：优先当前文档左边最近的一篇还开着的，否则右边第一篇（都没有就空）。
+ * activeQuery 是打开某篇文档时带进来的搜索高亮，当前文档被关掉后必须清掉。
+ */
+function removeDocs(state: DocsState, drop: Set<string>): DocsState {
+  if (!drop.size) return state;
+  const openDocs = state.openDocs.filter((d) => !drop.has(d.path));
+  if (openDocs.length === state.openDocs.length) return state;
+  const activeClosed = !!state.activeDoc && drop.has(state.activeDoc);
+  let activeDoc = state.activeDoc;
+  if (activeClosed) {
+    const i = state.openDocs.findIndex((d) => d.path === state.activeDoc);
+    const prev = state.openDocs.slice(0, i).reverse().find((d) => !drop.has(d.path));
+    const next = state.openDocs.slice(i + 1).find((d) => !drop.has(d.path));
+    activeDoc = (prev || next)?.path ?? null;
+  }
+  return {
+    openDocs,
+    activeDoc,
+    activeQuery: activeClosed ? null : state.activeQuery,
+  };
+}
 
 function docsReducer(state: DocsState, action: DocsAction): DocsState {
   switch (action.type) {
@@ -43,18 +68,10 @@ function docsReducer(state: DocsState, action: DocsAction): DocsState {
     }
     case 'activate':
       return { ...state, activeDoc: action.path };
-    case 'close': {
-      const i = state.openDocs.findIndex((d) => d.path === action.path);
-      if (i < 0) return state;
-      const openDocs = state.openDocs.filter((d) => d.path !== action.path);
-      const activeDoc =
-        state.activeDoc === action.path
-          ? openDocs.length
-            ? openDocs[Math.max(0, i - 1)].path
-            : null
-          : state.activeDoc;
-      return { openDocs, activeDoc, activeQuery: activeDoc === action.path ? null : state.activeQuery };
-    }
+    case 'close':
+      return removeDocs(state, new Set([action.path]));
+    case 'closeMany':
+      return removeDocs(state, new Set(action.paths));
     case 'reorder': {
       const openDocs = [...state.openDocs];
       const [moved] = openDocs.splice(action.from, 1);
@@ -93,6 +110,7 @@ interface StoreValue {
   openDoc: (path: string, title?: string, query?: string | null, anchor?: string) => void;
   activateDoc: (path: string) => void;
   closeDoc: (path: string) => void;
+  closeDocs: (paths: string[]) => void;
   reorderDocs: (from: number, to: number) => void;
   fileIndex: Map<string, string>;
   tree: TreeNode[];
@@ -396,11 +414,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [confirmLeaveEdit]);
 
   const clearScrollTarget = useCallback(() => setScrollTarget(null), []);
-  const closeDoc = useCallback((path: string) => {
-    // 关的正是正在编辑的那篇（或它所在的 set 被切走）时，先确认未保存改动。
-    if (path === editingPathRef.current && !confirmLeaveEdit(null)) return;
-    dispatch({ type: 'close', path });
+  // 批量关闭（侧栏「已打开」里按目录整组关）：组内有正在编辑的那篇时，先确认未保存改动。
+  const closeDocs = useCallback((paths: string[]) => {
+    if (!paths.length) return;
+    const editing = editingPathRef.current;
+    if (editing && paths.includes(editing) && !confirmLeaveEdit(null)) return;
+    dispatch({ type: 'closeMany', paths });
   }, [confirmLeaveEdit]);
+  const closeDoc = useCallback((path: string) => closeDocs([path]), [closeDocs]);
   const reorderDocs = useCallback(
     (from: number, to: number) => dispatch({ type: 'reorder', from, to }),
     [],
@@ -657,6 +678,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       openDoc,
       activateDoc,
       closeDoc,
+      closeDocs,
       reorderDocs,
       cacheRender,
       favorites,
@@ -708,6 +730,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       openDoc,
       activateDoc,
       closeDoc,
+      closeDocs,
       reorderDocs,
       cacheRender,
       favorites,
