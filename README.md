@@ -5,6 +5,7 @@
 ## 功能
 
 - 多空间（roots）扫描与热更
+- 阅读态列表样式：项目符号/编号按层级还原为 `•/◦/▪` 与 `1./a./i.`，任务清单用勾选框代替符号（见 `specs/reading-list-styles/`）
 - Markdown 渲染：GFM 任务列表 / 脚注 / emoji / KaTeX 数学 / mermaid / 代码高亮 / CJK 友好强调（`**"中文"**中文` 能加粗，见 `specs/cjk-friendly-emphasis/`）
 - 右侧目录：标题里的引号实体正常显示、公式用 KaTeX 同步渲染，纯公式标题也在目录里（见 `specs/toc-heading-render/`）
 - 正文编辑（见 `specs/doc-editing/`）：文档头「编辑」进入**单栏**编辑（像 Typora/Obsidian，没有上下分栏）——空闲时整篇仍是渲染结果（与预览逐像素对齐：进入编辑态不跳），点哪一块哪一块原地变成**带格式装饰的源码**（加粗/斜体/行内代码/链接/双链/公式/图片按渲染形态显示，标记符号光标移入才露出）；**连续的行内块会合并成一个编辑区**，一次可以看/改多段；表格/代码/图表/块级公式/原始 HTML 光标进入才显示源码。编辑器可在「保存」右侧切换：分块（CodeMirror 6）/ 源码 / Muya（MarkText 内核）/ Milkdown（Crepe，**默认**），后两者按需动态加载、保存会规范化 markdown；编辑态下「文档信息」（frontmatter）单独折叠编辑，粘贴/拖拽的图片上传到 Cloudflare R2（`pics` 桶，私有）+ 站内代理 `/api/asset/r2/*` 读取，markdown 写该代理路径；未配置 R2 时回落文档目录 `assets/`。「保存 / 取消」整篇写回（mtime 乐观锁，冲突时可选覆盖保存）；`⌘S` 保存。资源管理器右键「新建 Markdown 文件」「重命名」（改名会迁移标签页与收藏，不自动改引用）
@@ -16,6 +17,7 @@
 - 标签 / 双链 backlink / outlink / 关系图谱；出链面板按目标去重、显示引用次数（`×N`）、可点击跳转，悬空双链灰显不可点（见 `specs/outlinks/`）
 - 收藏置顶 / 待办 / 到期任务（`(due: YYYY-MM-DD)`，供 n8n 到期提醒消费）
 - 命令面板：`⌘P` 搜索（空态列当前空间最近更新的 20 篇）、`⌘O` 已打开文档看板（按目录分列，方向键导航）
+- 侧栏「已打开的文档」（见 `specs/opened-panel-close/`）：按一级目录分组，组头右侧一键关闭该目录下所有已打开文档，每行右侧悬浮出现 × 只关这一篇
 - 语义（向量）检索（`multilingual-e5-small`）
 - MCP 服务（SSE，端口 3002）：`list_allowed_directories` / `search_docs` / `read_doc` / `search_semantic` / `list_tags` / `list_todos` / `list_due_tasks`
 

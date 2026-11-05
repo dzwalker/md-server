@@ -35,3 +35,5 @@ specs/<feature-slug>/
 - `outlinks/`：出链面板去重 + 引用次数（`×N`）+ 点击跳转——`GET /api/outlinks/*` 响应从 `string[]` 改为 `{target,count}[]`，按正文首现排序；悬空双链灰显不可点（2026-10-19）。
 - `doc-editing/`：正文编辑——**单栏**编辑器（CodeMirror 6，按需动态加载）：空闲块显示服务端渲染结果、点进去原地变成带格式装饰的源码（表格/代码/图表/公式/原始 HTML 光标进入才显示源码），整篇保存带 mtime 乐观锁；资源管理器右键「新建 Markdown 文件 / 重命名」（`/api/docs`、`/api/docs/create`、`/api/docs/rename`、`/api/render-block`；写盘底座抽成 `src/file-write.ts`）（2026-11-03）。
 - `glossary/`：术语表——文件名约定（含「术语表」/`glossary`）、`## 术语 + 别名 + 定义`格式、按空间 set 生效、正文自动下划线 + 悬浮定义（长词优先/英文全词/前 3 条），`/api/render` 与 `/api/stat` 新增 glossary 字段（2026-10-26）。
+- `reading-list-styles/`：阅读态列表样式——Tailwind preflight 把 `ul/ol` 的 `list-style` 重置成 `none`，正文列表退化成缩进段落；在 `.md-content` 里还原 `disc/circle/square` 与 `decimal/lower-alpha/lower-roman`，任务清单项不叠符号，术语表悬浮定义同步修（2026-11-05）。
+- `opened-panel-close/`：侧栏「已打开的文档」——分组头右侧一键关闭该目录下全部已打开文档；每行右侧 × 悬浮出现、只关单篇；当前文档被关后按「左边最近优先」接任（2026-11-05）。
