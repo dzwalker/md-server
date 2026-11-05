@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { WriteError, statMdFile } from './file-write.js';
+import { r2ConfigFromEnv, uploadImageToR2 } from './r2.js';
 
 /**
  * 编辑态图片上传：把粘贴/拖拽进来的图片落到**当前文档所在目录下的 `assets/`**，
@@ -24,6 +25,18 @@ const MIME_EXT: Record<string, string> = {
   'image/webp': '.webp',
   'image/avif': '.avif',
 };
+
+/** 校验图片内容：MIME 白名单 + 大小上限，返回规范化后的类型与扩展名。 */
+function validateImage(contentType: string, data: Buffer): { ct: string; ext: string } {
+  const ct = String(contentType || '').split(';')[0].trim().toLowerCase();
+  const ext = MIME_EXT[ct];
+  if (!ext) throw new WriteError(`不支持的图片类型：${ct || '未知'}`, 415);
+  if (!data || data.length === 0) throw new WriteError('图片内容为空', 400);
+  if (data.length > MAX_UPLOAD_BYTES) {
+    throw new WriteError(`图片过大（上限 ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB）`, 413);
+  }
+  return { ct, ext };
+}
 
 export interface UploadResult {
   /** 相对文档目录的路径（写进 markdown 用，如 `assets/图片-20261104-120000-ab12.png`）。 */
@@ -82,13 +95,7 @@ export function saveDocImage(
   originalName?: string,
 ): UploadResult {
   statMdFile(docFsPath);
-  const ct = String(contentType || '').split(';')[0].trim().toLowerCase();
-  const ext = MIME_EXT[ct];
-  if (!ext) throw new WriteError(`不支持的图片类型：${ct || '未知'}`, 415);
-  if (!data || data.length === 0) throw new WriteError('图片内容为空', 400);
-  if (data.length > MAX_UPLOAD_BYTES) {
-    throw new WriteError(`图片过大（上限 ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)}MB）`, 413);
-  }
+  const { ct, ext } = validateImage(contentType, data);
 
   const docDir = path.dirname(docFsPath);
   const assetsDir = path.join(docDir, 'assets');
@@ -115,4 +122,46 @@ export function saveDocImage(
   const relPath = 'assets/' + fileName;
   const urlDir = docUrlPath.slice(0, docUrlPath.lastIndexOf('/'));
   return { relPath, urlPath: `${urlDir}/${relPath}`, size: data.length };
+}
+
+/** R2 上传结果（markdown 里写 url）。 */
+export interface RemoteUploadResult {
+  provider: 'r2';
+  key: string;
+  url: string;
+  size: number;
+}
+
+/** 本地上传结果（markdown 里写 relPath）。 */
+export interface LocalUploadResult extends UploadResult {
+  provider: 'local';
+}
+
+export type DocImageUploadResult = RemoteUploadResult | LocalUploadResult;
+
+/**
+ * 编辑态图片上传的统一入口。
+ *
+ * - 配了 R2（`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`）→ 传 `R2_BUCKET`（默认 `pics`），
+ *   返回站内代理地址 `/api/asset/r2/<key>`（桶保持私有，图和笔记同一个登录门）；
+ * - 没配 R2 → 落本地 `<文档目录>/assets/`（老行为，开发/测试环境用）。
+ *
+ * 两种情况都要求目标文档存在：避免这个接口变成匿名图床。
+ */
+export async function uploadDocImage(
+  docFsPath: string,
+  docUrlPath: string,
+  contentType: string,
+  data: Buffer,
+  originalName?: string,
+): Promise<DocImageUploadResult> {
+  const { ct, ext } = validateImage(contentType, data);
+  statMdFile(docFsPath);
+  const cfg = r2ConfigFromEnv();
+  if (cfg) {
+    const r = await uploadImageToR2(cfg, data, ct, ext);
+    return { provider: 'r2', key: r.key, url: r.url, size: data.length };
+  }
+  const local = saveDocImage(docFsPath, docUrlPath, ct, data, originalName);
+  return { provider: 'local', ...local };
 }

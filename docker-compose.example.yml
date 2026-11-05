@@ -3,6 +3,9 @@ services:
     build: .
     container_name: md-server
     restart: unless-stopped
+    env_file:
+      # 运行时密钥（R2 凭证等）；复制 .env.example 模板后填写，不要提交
+      - .env
     environment:
       - MD_PORT=3001
       # set 里的目录名都相对于该父目录
