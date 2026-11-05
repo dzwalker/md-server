@@ -111,3 +111,15 @@
 - [x] 前端 `api.uploadImage`、`lib/asset-url.ts`（编辑器内相对路径 → `/api/asset`，CodeMirror 与 Crepe 共用）。
 - [x] 实测：图片显示为 `/api/asset/space1/assets/demo.png`；`/` 菜单含双链/笔记行且能插入；上传后文件 `dev:dev 644`。
 - [x] 门禁：tsc 两端、`npm test` 137 全绿、web build 通过。
+
+## T13 图片上传改用 R2（2026-11-05）
+
+- [x] 新增依赖 `@aws-sdk/client-s3`（仅服务端）。
+- [x] `src/r2.ts`：环境变量配置（endpoint/bucket/prefix/凭证/可选公开基址）、`buildImageKey`（`md/yyyy/mm/uuid.ext`）、`uploadImageToR2`、`getR2Object`、`isSafeR2Key`、client 缓存与测试重置。
+- [x] `src/upload.ts`: 抽出 `validateImage`；新增 `uploadDocImage` 统一入口（R2 优先、否则本地回落），返回 `provider` 字段。
+- [x] 路由：`POST /api/asset/upload` 改用 `uploadDocImage`；新增 `GET /api/asset/r2/*` 私有桶读代理（key 白名单、404/502 映射、immutable 缓存）。
+- [x] 前端：`api.uploadImage` 返回 `provider/url/relPath`；Crepe `onUpload` 按 provider 取值。
+- [x] 配置：仓库 `.env`（600，gitignore）模板 + `docker-compose.yml` / `docker-compose.example.yml` 的 `env_file`。
+- [x] 单测：`src/r2.test.ts`（配置解析、key 生成、key 白名单）+ `upload.test.ts` 补统一入口回落与校验（共 8 例）。
+- [x] 无凭证场景实测：上传回落本地（`provider: local`）、`GET /api/asset/r2/*` 返回 404。
+- [ ] 填好凭证后真传一张图 + 代理读回 200（待用户填 `.env`）。

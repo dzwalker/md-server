@@ -11,7 +11,8 @@ import { renderMarkdown } from './render.js';
 import { glossaryForDoc, glossaryVersionForDoc, invalidateGlossaryFileCache } from './glossary.js';
 import { applyNoteToFile, toNoteOpInput, type NoteOpInput } from './notes.js';
 import { saveDocFile, createDocFile, renameDocFile, validateDocBaseName, docFileName } from './docs.js';
-import { saveDocImage } from './upload.js';
+import { uploadDocImage } from './upload.js';
+import { isSafeR2Key, getR2Object, r2ConfigFromEnv } from './r2.js';
 import { WriteError } from './file-write.js';
 import { rebuildIndex, syncIndex, removeIndexPrefixInBatches, searchFiles, listTags, indexStats, backlinks, outlinks, graph, listFavorites, setFavorite, removeFavorite, renameFavorite, listTodos, listDueTasks, indexFiles, indexFilesInBatches, removeIndexPaths, removeIndexPrefix, listFileSummaries, listFilesMeta, getFileMeta, listRecentFiles, listNotes, truncateWal } from './index-db.js';
 import { startMcp } from './mcp.js';
@@ -314,8 +315,28 @@ app.post('/api/asset/upload', { bodyLimit: 11 * 1024 * 1024 }, async (req, reply
   const body = req.body;
   if (!Buffer.isBuffer(body)) return reply.code(400).send({ error: '需要二进制请求体（图片）' });
   try {
-    const r = saveDocImage(fsPath, p, String(req.headers['content-type'] || ''), body, String(name || ''));
+    // 配了 R2 就传 R2（返回站内代理地址），否则回落本地 assets/（老行为）
+    const r = await uploadDocImage(fsPath, p, String(req.headers['content-type'] || ''), body, String(name || ''));
     return { ok: true, ...r };
+  } catch (e) {
+    if (e instanceof WriteError) return reply.code(e.status).send({ error: e.message });
+    throw e;
+  }
+});
+
+// R2 私有桶的读代理：图片与笔记共用同一道登录门（nginx SSO），key 走长缓存。
+// markdown 里写的是 `/api/asset/r2/<key>`，所以离线/外部工具打不开是预期行为。
+app.get('/api/asset/r2/*', async (req, reply) => {
+  const key = String((req.params as any)['*'] || '');
+  const cfg = r2ConfigFromEnv();
+  if (!cfg) return reply.code(404).send({ error: 'R2 未配置' });
+  if (!isSafeR2Key(key, cfg.prefix)) return reply.code(400).send({ error: '非法的图片 key' });
+  try {
+    const obj = await getR2Object(cfg, key);
+    // 缓存头统一由 onSend 钩子按 URL 设置（见文件末尾）
+    if (obj.contentType) reply.header('Content-Type', obj.contentType);
+    if (obj.contentLength) reply.header('Content-Length', String(obj.contentLength));
+    return reply.send(obj.body as any);
   } catch (e) {
     if (e instanceof WriteError) return reply.code(e.status).send({ error: e.message });
     throw e;
@@ -432,6 +453,8 @@ app.addHook('onSend', async (req, reply) => {
   const url = req.raw.url || '';
   if (url.startsWith('/assets/')) reply.header('Cache-Control', 'public, max-age=31536000, immutable');
   else if (url.startsWith('/media/')) reply.header('Cache-Control', 'public, max-age=604800');
+  // R2 图片代理：对象 key 带 uuid、内容不可变，可以长缓存（否则每张图都回源）
+  else if (url.startsWith('/api/asset/r2/')) reply.header('Cache-Control', 'public, max-age=31536000, immutable');
   else reply.header('Cache-Control', 'no-cache');
 });
 

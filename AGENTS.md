@@ -36,6 +36,7 @@
 | `src/embed.ts` | 语义向量（HF transformers + sqlite） |
 | `src/notes.ts` | 正文笔记（`> note: 内容` 一行）的业务：笔记行识别、增/改/删 |
 | `src/file-write.ts` | 写 md 的唯一底座：只允许 .md、临时文件 + rename 原子替换、保持属主/属组/权限、mtime 乐观锁（`WriteError` / `statMdFile` / `checkMtimeLock` / `writeFileAtomic`） |
+| `src/r2.ts` | Cloudflare R2 图片存储（S3 兼容）：上传 / 私有桶读代理 `/api/asset/r2/*` / key 白名单（见 `specs/doc-editing/`） |
 | `src/docs.ts` | 正文文档的文件级操作：整篇保存 / 新建 / 改名 + 文件名校验（`saveDocFile` / `createDocFile` / `renameDocFile` / `validateDocBaseName`，见 `specs/doc-editing/`） |
 | `src/mcp.ts` | MCP 工具服务（SSE） |
 | `src/index.ts` | HTTP 路由 + 文件 watcher 实时索引 + 启动装配 |

@@ -114,7 +114,19 @@ export const api = {
   createDoc: (req: DocCreateRequest) => post<DocCreateResponse>('/api/docs/create', req),
   renameDoc: (req: DocRenameRequest) => post<DocRenameResponse>('/api/docs/rename', req),
   // 编辑态图片上传：落到文档目录的 assets/，返回相对路径（写进 markdown）与 urlPath。
-  uploadImage: async (docPath: string, file: File): Promise<{ relPath: string; urlPath: string; size: number }> => {
+  uploadImage: async (
+    docPath: string,
+    file: File,
+  ): Promise<{
+    provider: 'r2' | 'local';
+    /** provider=r2 时写进 markdown 的地址（站内 /api/asset/r2/… 或绝对 URL） */
+    url?: string;
+    /** provider=local 时写进 markdown 的相对路径 */
+    relPath?: string;
+    urlPath?: string;
+    key?: string;
+    size: number;
+  }> => {
     const qs = new URLSearchParams({ path: docPath, name: file.name || 'image' });
     const res = await fetch(`/api/asset/upload?${qs.toString()}`, {
       method: 'POST',
@@ -131,7 +143,14 @@ export const api = {
       }
       throw new Error(msg);
     }
-    return res.json() as Promise<{ relPath: string; urlPath: string; size: number }>;
+    return res.json() as Promise<{
+      provider: 'r2' | 'local';
+      url?: string;
+      relPath?: string;
+      urlPath?: string;
+      key?: string;
+      size: number;
+    }>;
   },
   // 块级实时预览（只读）：把一块源码按该文档的目录/术语表上下文渲染成 HTML。
   renderBlock: (path: string, markdown: string) =>

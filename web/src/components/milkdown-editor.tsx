@@ -137,7 +137,8 @@ export const MilkdownEditor = forwardRef<RichEditorHandle, Props>(function Milkd
             proxyDomURL: (url: string) => assetUrlForDoc(docPathRef.current, url),
             onUpload: async (file: File) => {
               const r = await api.uploadImage(docPathRef.current, file);
-              return r.relPath;
+              // R2：写站内代理地址（/api/asset/r2/…）；未配置 R2 时回落本地相对路径
+              return r.provider === 'r2' && r.url ? r.url : (r.relPath ?? r.urlPath ?? '');
             },
             onImageLoadError: (event: Event) => {
               const img = event.target as HTMLImageElement | null;

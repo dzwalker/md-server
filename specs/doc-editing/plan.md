@@ -98,6 +98,7 @@ segments = [ {kind:'gap', src:['','']}, {kind:'block', cls:'text', src:[...], ht
 
 - **frontmatter**：`splitFrontmatter` / `joinFrontmatter`（doc-editor 内）把文档拆成「YAML 头 + 正文」；编辑器只拿正文，头渲染成默认折叠的 `<details>`，点开是 textarea；拼回时保留原分隔符（`---`/`...`）并在正文前补一个空行（富文本序列化会吃掉它）。
 - **图片**：新增 `src/upload.ts` 与 `POST /api/asset/upload`（二进制 body，query 带 `path`/`name`）：扩展名按 MIME 决定、10MB 上限、非图片 415、写进 `<文档目录>/assets/`、新文件/新目录属主对齐文档目录；前端 `api.uploadImage` → Crepe `imageBlock.onUpload` 返回**相对路径**（markdown 可移植），`proxyDomURL` 负责显示时改写成 `/api/asset/*`。
+- **R2（2026-11-05）**：`src/r2.ts` 用 `@aws-sdk/client-s3`（仅服务端）连本账号 endpoint；上传 key `md/<yyyy>/<mm>/<uuid>.<ext>`、`ContentType` 按 MIME、`CacheControl: immutable`；桶**保持私有**，读取走 `GET /api/asset/r2/*` 代理（服务端凭证取对象，透传 Content-Type + 长缓存），markdown 写站内地址；`R2_PUBLIC_BASE_URL` 留空即用代理，想换绝对 URL 再填。未配置凭证时 `uploadDocImage` 回落本地 `assets/`，行为与之前一致。密钥在仓库 `.env`（600、gitignore），compose 用 `env_file` 注入。
 - **Crepe 配置 key 必须是 `CrepeFeature` 的枚举值**（`'image-block'`/`'block-edit'`…），写驼峰属性名会被静默忽略（踩过一次）。
 
 - 三条富文本路径都是**动态 import**：只有切到该模式才加载，阅读/分块编辑不受影响。

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { MAX_UPLOAD_BYTES, saveDocImage } from './upload.js';
+import { MAX_UPLOAD_BYTES, saveDocImage, uploadDocImage } from './upload.js';
 import { WriteError } from './file-write.js';
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'md-server-upload-'));
@@ -71,5 +71,29 @@ describe('图片上传 saveDocImage', () => {
     expect(a.relPath).not.toBe(b.relPath);
     expect(fs.existsSync(path.join(tmpDir, 'assets', path.basename(a.relPath)))).toBe(true);
     expect(fs.existsSync(path.join(tmpDir, 'assets', path.basename(b.relPath)))).toBe(true);
+  });
+});
+
+describe('统一入口 uploadDocImage', () => {
+  it('未配置 R2 时回落本地上传（markdown 用相对路径）', async () => {
+    const prev = { id: process.env.R2_ACCESS_KEY_ID, secret: process.env.R2_SECRET_ACCESS_KEY };
+    delete process.env.R2_ACCESS_KEY_ID;
+    delete process.env.R2_SECRET_ACCESS_KEY;
+    try {
+      const doc = docFile('r2-fallback.md');
+      const r = await uploadDocImage(doc, '/space/r2-fallback.md', 'image/png', PNG, '截图.png');
+      expect(r.provider).toBe('local');
+      if (r.provider === 'local') {
+        expect(r.relPath.startsWith('assets/')).toBe(true);
+      }
+    } finally {
+      if (prev.id) process.env.R2_ACCESS_KEY_ID = prev.id;
+      if (prev.secret) process.env.R2_SECRET_ACCESS_KEY = prev.secret;
+    }
+  });
+
+  it('统一入口也做同样的校验（非图片 415）', async () => {
+    const doc = docFile('r2-bad.md');
+    await expect(uploadDocImage(doc, '/space/r2-bad.md', 'text/html', PNG)).rejects.toMatchObject({ status: 415 });
   });
 });

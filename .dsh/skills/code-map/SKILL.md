@@ -19,7 +19,8 @@ whenToUse: 需要理解或修改 md-server 结构时（web/ 前端 React 工程�
 | `file-write.ts` | 写 md 的唯一底座：只允许 .md、临时文件 + rename 原子替换、保持属主/属组/权限、mtime 乐观锁 | `WriteError`, `statMdFile`, `checkMtimeLock`, `writeFileAtomic` |
 | `notes.ts` | 正文笔记（`> note: 内容` 一行）：识别 / 增改删（落盘走 `file-write.ts`，见 `specs/notes/`） | `applyNoteToFile`, `applyNoteOp`, `toNoteOpInput`, `isNoteLine`, `NoteError` |
 | `docs.ts` | 正文文档文件级操作：整篇保存 / 新建 / 改名 + 文件名校验（见 `specs/doc-editing/`） | `saveDocFile`, `createDocFile`, `renameDocFile`, `validateDocBaseName`, `DocError` |
-| `upload.ts` | 编辑态图片上传：落盘到文档目录 `assets/`、MIME 定扩展名、10MB 上限、属主对齐（见 `specs/doc-editing/`） | `saveDocImage`, `MAX_UPLOAD_BYTES` |
+| `upload.ts` | 编辑态图片上传统一入口：配了 R2 就传 R2，否则落盘文档目录 `assets/`；MIME 定扩展名、10MB 上限（见 `specs/doc-editing/`） | `uploadDocImage`, `saveDocImage`, `MAX_UPLOAD_BYTES` |
+| `r2.ts` | Cloudflare R2（S3 兼容）：环境变量配置、key 生成 `md/yyyy/mm/uuid.ext`、上传、私有桶读代理（`/api/asset/r2/*`） | `uploadImageToR2`, `getR2Object`, `isSafeR2Key`, `r2ConfigFromEnv` |
 | `glossary.ts` | 术语表：命名/解析/按空间 set 聚合/匹配器/版本（见 `specs/glossary/`） | `isGlossaryFileName`, `parseGlossaryMarkdown`, `buildGlossaryIndex`, `glossaryForDoc`, `glossaryVersionForDoc` |
 | `embed.ts` | 语义向量（HF transformers + sqlite） | `buildEmbeddings`, `embedFiles`, `deleteEmbeddings`, `semanticSearch`, `embeddingsStatus` |
 | `mcp.ts` | MCP 工具服务（SSE，端口 3002） | `startMcp` |
@@ -53,7 +54,7 @@ whenToUse: 需要理解或修改 md-server 结构时（web/ 前端 React 工程�
 | 库 | `src/lib/note-patch.ts` | 保存笔记时只替换目标那张卡片（整篇 DOM 不动 → 公式/图表不闪），并重编号下方块行号（见 `specs/notes/plan.md` §7） |
 | 库 | `src/lib/scroll-anchor.ts` | 正文整篇重注入时的滚动位置保持（content-visibility 估值漂移的补偿，见 `specs/notes/plan.md` §5） |
 
-- 依赖 API：`/api/tree` `/api/files` `/api/files/*` `/api/render/*`（含 `glossary`）`/api/stat`（含 `glossaryVersion`）`/api/notes`（POST，写笔记行）`/api/docs`（POST 整篇保存）`/api/docs/create`（POST 新建）`/api/docs/rename`（POST 改名）`/api/render-block`（POST 块级预览，只读）`/api/asset/upload`（POST 图片上传，二进制 body）`/api/search` `/api/search-semantic` `/api/recent` `/api/tags` `/api/backlinks/*` `/api/outlinks/*` `/api/graph` `/api/favorites` `/api/todos` `/api/sets` `/api/status` `/api/asset/*`
+- 依赖 API：`/api/tree` `/api/files` `/api/files/*` `/api/render/*`（含 `glossary`）`/api/stat`（含 `glossaryVersion`）`/api/notes`（POST，写笔记行）`/api/docs`（POST 整篇保存）`/api/docs/create`（POST 新建）`/api/docs/rename`（POST 改名）`/api/render-block`（POST 块级预览，只读）`/api/asset/upload`（POST 图片上传，二进制 body）`/api/asset/r2/*`（GET R2 私有桶读代理）`/api/search` `/api/search-semantic` `/api/recent` `/api/tags` `/api/backlinks/*` `/api/outlinks/*` `/api/graph` `/api/favorites` `/api/todos` `/api/sets` `/api/status` `/api/asset/*`
 - 渲染库：按需加载 `/media/*`（katex / mermaid / highlight）；编辑器：`web/src/lib/md-codemirror.ts` 只在进入编辑态时动态加载（`md-codemirror-*.js`）
 
 ### 基础设施
