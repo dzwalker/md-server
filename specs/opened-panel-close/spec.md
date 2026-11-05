@@ -46,3 +46,6 @@
   - 组头 × 可见，文案带篇数；行内 × 悬浮前 `opacity:0`、悬浮后 `1`；
   - 单篇关闭 README 后：`openDocs=['/lark-archive/AGENTS.md']`、`activeDoc` 回落到 AGENTS、tab 栏剩 1 个；
   - 组头 × 后：`openDocs=[]`、`activeDoc=null`、显示「暂无打开的文档」，`md-open-tabs-by-set` 落盘一致。
+- 2026-11-05 **已上线**：随「阅读态列表样式」一起 `docker compose up -d --build`（manifest `sha256:b57184b6…`），
+  线上容器内重跑同一套无头 Chrome 检查：组头 × 可见、行内 × 悬浮前 `opacity:0` / 悬浮后 `1`、单篇关闭后
+  `openDocs=['/lark-archive/AGENTS.md']`、组关闭后 `openDocs=[]` 且显示「暂无打开的文档」。

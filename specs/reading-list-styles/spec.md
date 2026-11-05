@@ -49,5 +49,9 @@
   - 修后：`ul>li`=`disc`、`ul ul>li`=`circle`、`ul ul ul>li`=`square`、`ol>li`=`decimal`、`ol ol>li`=`lower-alpha`、
     `li.task-list-item`=`none`（有勾选框）；
   - 真实文档（`/lark-archive/AGENTS.md`，4 个 ul + 1 个 ol）在 `claude` 与 `prose`+暗色两套主题下均正常。
-- 生效方式：容器镜像在构建阶段产出 `web/dist`（Dockerfile 多阶段），因此**需要重新 build 镜像才会上线**；
+- 生效方式：容器镜像在构建阶段产出 `web/dist`（Dockerfile 多阶段），因此需要重新 build 镜像才会上线；
   本地/开发直连后端时若 `web/dist` 不存在，会回退 `public/index.html`（旧前端无 preflight，不受影响）。
+- 2026-11-05 **已上线**：本机 `docker compose up -d --build`，镜像 `md-server-md-server:latest`
+  （manifest `sha256:b57184b6…`）。核对：镜像内 `web/dist/assets/index-Ba3tqIMb.css` 与本地已浏览器验证的产物
+  sha256 逐字节一致（`96b31a18…`）；容器 `healthz` = ok（8 roots / 5 sets / 3402 files）；对容器直连跑无头 Chrome，
+  真实文档 `/lark-archive/AGENTS.md` 的 `ul>li`=`disc`、`ol>li`=`decimal`；`https://md.zwalker.me` 仍是既有登录网关 302。
