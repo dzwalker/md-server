@@ -16,7 +16,7 @@ import type { TreeNode } from '@/lib/types';
 import { api } from '@/lib/api';
 import { useStore } from '@/state/store';
 import { useElementSize } from '@/hooks/use-element-size';
-import { cn, stripMdExt } from '@/lib/utils';
+import { cn, scopeLabel, scopeLabels, stripMdExt } from '@/lib/utils';
 import { copyText } from '@/lib/clipboard';
 import { downloadDocByPath } from '@/lib/download';
 import { Button } from '@/components/ui/button';
@@ -113,6 +113,7 @@ function TreeNodeRow({ node, style }: NodeRendererProps<TreeNode>) {
       <Icon className={cn('h-4 w-4 shrink-0', isDir ? 'text-muted-foreground' : 'text-primary/70')} />
       <button
         type="button"
+        title={isDir ? d.path : undefined}
         className={cn('min-w-0 flex-1 truncate text-left', isDir ? 'font-medium' : 'hover:underline')}
         onClick={() => {
           if (isDir) node.toggle();
@@ -226,6 +227,18 @@ function hasFileDescendant(n: TreeNode): boolean {
   return !!n.children && n.children.some(hasFileDescendant);
 }
 
+// 在全局树里按 urlPath 定位节点（作用域条目可能深于一级目录，如 notion-archive/学习成长）。
+function findNodeByPath(nodes: TreeNode[], target: string): TreeNode | null {
+  for (const n of nodes) {
+    if (n.path === target) return n;
+    if (n.children) {
+      const hit = findNodeByPath(n.children, target);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
 // 剪掉「后代里没有任何 md 文件」的目录；depth===0 是顶层空间，始终保留（1 级要保留）。
 function pruneEmptyDirs(nodes: TreeNode[], depth: number): TreeNode[] {
   const out: TreeNode[] = [];
@@ -265,16 +278,21 @@ export function TreeView() {
     [],
   );
 
-  // 按当前 set 的目录过滤并排序顶层节点（set 里目录的顺序即树中顺序），
-  // 再按设置决定是否隐藏「无文档」的空文件夹。
+  // 按当前 set 的作用域条目取树节点（条目顺序即树中顺序）。条目可以深于一级目录
+  // （如 notion-archive/学习成长）：取该目录在全局树里的子树当一级节点，显示名取最后一段。
+  // 条目在树上不存在（空目录未建节点等）时给一个占位节点，保证空间不至于整块空白。
   const visible = useMemo(() => {
-    let nodes = data;
+    let nodes: TreeNode[];
     if (setsLoaded && activeSet) {
-      const order = new Map(activeSet.dirs.map((d, i) => [d, i]));
-      nodes = data
-        .filter((n) => order.has(n.name))
-        .slice()
-        .sort((a, b) => (order.get(a.name)! - order.get(b.name)!));
+      const labels = scopeLabels(activeSet.dirs);
+      nodes = activeSet.dirs.map((d) => {
+        const path = '/' + d.replace(/^\/+|\/+$/g, '');
+        const name = labels.get(d) || scopeLabel(d);
+        const hit = findNodeByPath(data, path);
+        return hit ? { ...hit, name } : { name, path, type: 'dir' as const, children: [] };
+      });
+    } else {
+      nodes = data;
     }
     if (hideEmptyDirs) nodes = pruneEmptyDirs(nodes, 0);
     return [...nodes, TOOLS_NODE];

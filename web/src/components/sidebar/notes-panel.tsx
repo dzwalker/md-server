@@ -5,7 +5,7 @@ import type { NoteFile, NoteRef } from '@/lib/types';
 import { useStore } from '@/state/store';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { cn, scopeDirOf, scopeLabel, scopeLabels, topDirOf } from '@/lib/utils';
 import { notePreview } from '@/lib/notes';
 
 interface NotesPanelProps {
@@ -21,7 +21,7 @@ interface DirGroup {
 }
 
 /**
- * 侧栏「笔记」面板：当前空间 → 一级目录（只留最上级）→ 有笔记的文件 → 每条笔记。
+ * 侧栏「笔记」面板：当前空间 → 目录（set 的作用域条目，可深于一级目录）→ 有笔记的文件 → 每条笔记。
  * 数据来自只读接口 `GET /api/notes`（服务端直接从索引库的 body 现算，见 specs/notes-browse/）。
  */
 export function NotesPanel({ isActive }: NotesPanelProps) {
@@ -65,21 +65,28 @@ export function NotesPanel({ isActive }: NotesPanelProps) {
     return () => window.clearTimeout(t);
   }, [dataVersion, load]);
 
-  // 一级目录分组（当前空间 set.dirs 的顺序即分组顺序）；路径的第一段就是它所属的一级目录。
+  // 分组：当前空间 set 的每个作用域条目一组（条目可深于一级目录，如 notion-archive/学习成长），
+  // 组名取最后一段、顺序即 set 里的条目顺序；没有 set 时回退为「路径第一段」分组。
   const groups = useMemo<DirGroup[]>(() => {
+    const dirs = activeSet?.dirs ?? [];
     const map = new Map<string, NoteFile[]>();
     for (const f of files) {
-      const top = f.path.split('/').filter(Boolean)[0] || '';
-      const arr = map.get(top);
+      const key = (dirs.length ? scopeDirOf(f.path, dirs) : topDirOf(f.path)) ?? '';
+      const arr = map.get(key);
       if (arr) arr.push(f);
-      else map.set(top, [f]);
+      else map.set(key, [f]);
     }
-    const order = (activeSet?.dirs || []).filter((d) => map.has(d));
-    const names = order.length ? order : Array.from(map.keys()).sort();
-    return names.map((name) => {
-      const fs = map.get(name) || [];
-      return { name, files: fs, count: fs.reduce((n, f) => n + f.notes.length, 0) };
-    });
+    const labels = scopeLabels(dirs);
+    const toGroup = (key: string): DirGroup => {
+      const fs = map.get(key) ?? [];
+      return {
+        name: dirs.includes(key) ? labels.get(key) || scopeLabel(key) : key,
+        files: fs,
+        count: fs.reduce((n, f) => n + f.notes.length, 0),
+      };
+    };
+    const order = dirs.filter((d) => map.has(d));
+    return (order.length ? order : Array.from(map.keys()).sort()).map(toGroup);
   }, [files, activeSet]);
 
   const q = query.trim().toLowerCase();

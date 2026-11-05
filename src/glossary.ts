@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
-import { SETS } from './config.js';
+import { SETS, inScope } from './config.js';
 import { listFileSummaries } from './index-db.js';
 import { resolveUrlPath } from './scanner.js';
 
@@ -286,13 +286,12 @@ function stripDir(dir: string): string {
   return dir.replace(/^\/+|\/+$/g, '');
 }
 
-/** 文档一级目录 → 包含它的所有 set 的目录并集（排序，保证索引键稳定）。 */
+/** 文档 urlPath → 包含它的所有 set 的作用域条目并集（排序，保证索引键稳定）。 */
 export function spaceDirsForPath(urlPath: string, sets: { dirs: string[] }[] = SETS): string[] {
-  const top = urlPath.split('/').filter(Boolean)[0] || '';
-  if (!top) return [];
+  if (!stripDir(urlPath)) return [];
   const dirs = new Set<string>();
   for (const set of sets) {
-    if (!set.dirs.some((d) => stripDir(d) === top)) continue;
+    if (!set.dirs.some((d) => inScope(urlPath, d))) continue;
     for (const d of set.dirs) {
       const dir = stripDir(d);
       if (dir) dirs.add(dir);
@@ -306,23 +305,15 @@ interface GlossaryFileRef {
   mtimeMs: number;
 }
 
-interface GlossaryFileCandidate {
-  urlPath: string;
-  top: string;
-}
-
 // 全量文件清单（listFileSummaries）在 2800+ 篇文档时约 60ms（files 表每行带 body，扫表很贵）。
 // 但术语表文件集合只在索引增删改时变化，所以缓存起来，由 index.ts 的 bumpVersion 通知失效。
-let fileCandidatesCache: GlossaryFileCandidate[] | null = null;
+let fileCandidatesCache: string[] | null = null;
 
-function glossaryFileCandidates(): GlossaryFileCandidate[] {
+function glossaryFileCandidates(): string[] {
   if (fileCandidatesCache) return fileCandidatesCache;
-  const out: GlossaryFileCandidate[] = [];
+  const out: string[] = [];
   for (const summary of listFileSummaries()) {
-    if (!isGlossaryFileName(summary.name)) continue;
-    const top = summary.urlPath.split('/').filter(Boolean)[0] || '';
-    if (!top) continue;
-    out.push({ urlPath: summary.urlPath, top });
+    if (isGlossaryFileName(summary.name)) out.push(summary.urlPath);
   }
   fileCandidatesCache = out;
   return out;
@@ -336,16 +327,15 @@ export function invalidateGlossaryFileCache(): void {
 function glossaryFilesFor(urlPath: string): { dirs: string[]; files: GlossaryFileRef[] } {
   const dirs = spaceDirsForPath(urlPath);
   if (!dirs.length) return { dirs, files: [] };
-  const dirSet = new Set(dirs);
   const files: GlossaryFileRef[] = [];
   for (const candidate of glossaryFileCandidates()) {
-    if (!dirSet.has(candidate.top)) continue;
-    const fsPath = resolveUrlPath(candidate.urlPath);
+    if (!dirs.some((d) => inScope(candidate, d))) continue;
+    const fsPath = resolveUrlPath(candidate);
     if (!fsPath) continue;
     try {
       const st = fs.statSync(fsPath);
       if (!st.isFile()) continue;
-      files.push({ urlPath: candidate.urlPath, mtimeMs: st.mtimeMs });
+      files.push({ urlPath: candidate, mtimeMs: st.mtimeMs });
     } catch {
       /* 文件刚被删/不可读：这次不生效 */
     }

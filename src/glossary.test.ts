@@ -112,6 +112,16 @@ describe('空间作用域聚合', () => {
     expect(spaceDirsForPath('/z/doc.md', sets)).toEqual([]);
   });
 
+  it('子目录作用域：前缀命中才算，别的子目录不串味', () => {
+    const sets = [{ dirs: ['notion-archive/study', 'notion-archive/hobby'] }];
+    expect(spaceDirsForPath('/notion-archive/study/a.md', sets)).toEqual([
+      'notion-archive/hobby',
+      'notion-archive/study',
+    ]);
+    expect(spaceDirsForPath('/notion-archive/work/a.md', sets)).toEqual([]);
+    expect(spaceDirsForPath('/notion-archive/study2/a.md', sets)).toEqual([]);
+  });
+
   it('同一个名字多处定义：按文件顺序聚合、完全相同定义去重、前 3 条由渲染层截断', () => {
     const index = buildGlossaryIndex(
       [

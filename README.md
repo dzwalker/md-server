@@ -4,7 +4,7 @@
 
 ## 功能
 
-- 多空间（roots）扫描与热更
+- 多空间 set：一个 set 里组合多个目录、目录可深到任意层子目录（`notion-archive/学习成长` 这种），切换后侧栏只显示该 set 的目录；文档 URL/索引前缀仍是物理路径（见 `specs/space-scope/`）
 - 阅读态列表样式：项目符号/编号按层级还原为 `•/◦/▪` 与 `1./a./i.`，任务清单用勾选框代替符号（见 `specs/reading-list-styles/`）
 - Markdown 渲染：GFM 任务列表 / 脚注 / emoji / KaTeX 数学 / mermaid / 代码高亮 / CJK 友好强调（`**"中文"**中文` 能加粗，见 `specs/cjk-friendly-emphasis/`）
 - 右侧目录：标题里的引号实体正常显示、公式用 KaTeX 同步渲染，纯公式标题也在目录里（见 `specs/toc-heading-render/`）
@@ -28,23 +28,30 @@ npm install
 npm run dev   # http://localhost:3001
 ```
 
-## 配置多空间
+## 配置多空间（空间 set + 作用域）
 
-文档空间的映射（URL 前缀 → 目录）通过三种方式指定，优先级从高到低：
+文档空间由「空间 set」定义，配置在 `sets.json`（路径由 `MD_SETS_FILE` 指定，默认 `/app/sets.json`；也支持环境变量 `MD_SETS`，最后回落 `src/config.ts` 的内置默认值）。每个 set 形如：
 
-1. `roots.json`（路径由 `MD_ROOTS_FILE` 指定，默认 `/app/roots.json`）
-2. 环境变量 `MD_ROOTS`（JSON 数组）
-3. 代码内默认值（`src/config.ts`）
+```json
+{ "id": "study", "name": "📚 学习成长", "dirs": ["notion-archive/学习成长"], "embed": false }
+```
 
-示例见 [`roots.example.json`](./roots.example.json)，Docker 部署示例见 [`docker-compose.example.yml`](./docker-compose.example.yml)。
+- `dirs` 里每个条目叫「作用域」：**相对挂载根**（`MD_BASE_DIR`，默认 `/data/workspace`）的目录，可以是一级目录（`investment`），也可以是任意层子目录（`notion-archive/学习成长`）。
+- 物理 root 永远按条目的第一段派生：`notion-archive/学习成长` → URL 前缀 `/notion-archive`、磁盘 `<MD_BASE_DIR>/notion-archive`。因此文档的 urlPath（`/notion-archive/学习成长/a.md`）、图片相对链接、收藏、双链、索引行都不因为空间划分而改变。
+- 切换 set 后，侧栏只显示该 set 的作用域目录（子目录条目显示成一级节点，名字取最后一段）；「笔记」「已打开」面板同口径分组；术语表与语义索引也按作用域前缀生效。
+- 同一个 set 内的条目不能互相包含（父目录与它的子目录只能选一个）；跨 set 允许重叠。
+- UI：侧栏「空间管理」→「选择目录」弹窗（`GET /api/browse`）逐层挑目录，不用手打目录名。
+
+旧的 `roots.json` 映射（`MD_ROOTS` / `MD_ROOTS_FILE`）已由空间 set 取代；老部署如需保留，把 `{url, dir}` 改写成 set 的一级目录条目即可。示例见 [`roots.example.json`](./roots.example.json) 与 [`docker-compose.example.yml`](./docker-compose.example.yml)。
 
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `MD_PORT` | `3001` | HTTP 端口 |
-| `MD_ROOTS` | 内置默认 | JSON 数组，如 `[{"url":"/docs","dir":"/data/docs"}]` |
-| `MD_ROOTS_FILE` | `/app/roots.json` | roots 配置文件名（多空间管理热加载） |
+| `MD_BASE_DIR` | `/data/workspace` | 空间目录的挂载根：set 里的作用域条目都相对它 |
+| `MD_SETS` | 内置默认 | set 配置 JSON 数组（覆盖 `sets.json`） |
+| `MD_SETS_FILE` | `/app/sets.json` | 空间 set 配置文件名（UI 保存后热加载） |
 | `MD_INDEX_DB` | `/data/index/md-index.db` | SQLite 索引库路径 |
 | `EMBED_MODEL` | `Xenova/multilingual-e5-small` | 语义向量模型 |
 | `MCP_PORT` | `3002` | MCP SSE 端口 |

@@ -55,6 +55,22 @@ export interface SetsResponse {
   sets: SpaceSet[];
 }
 
+/** /api/browse：目录选择弹窗的一层目录。 */
+export interface BrowseEntry {
+  name: string;
+  /** 相对挂载根的路径，可直接作为 set 的作用域条目（如 `notion-archive/学习成长`）。 */
+  path: string;
+  mdCount: number;
+  hasChildren: boolean;
+}
+
+export interface BrowseResponse {
+  baseDir: string;
+  path: string;
+  parent: string | null;
+  entries: BrowseEntry[];
+}
+
 /** 目录条目里的一段：纯文本，或要用 KaTeX 渲染的行内公式（见 src/render.ts headingContent）。 */
 export interface TocPart {
   type: 'text' | 'math';

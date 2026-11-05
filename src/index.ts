@@ -14,6 +14,7 @@ import { saveDocFile, createDocFile, renameDocFile, validateDocBaseName, docFile
 import { uploadDocImage } from './upload.js';
 import { isSafeR2Key, getR2Object, r2ConfigFromEnv } from './r2.js';
 import { WriteError } from './file-write.js';
+import { listBrowseDirs, BrowseError } from './browse.js';
 import { rebuildIndex, syncIndex, removeIndexPrefixInBatches, searchFiles, listTags, indexStats, backlinks, outlinks, graph, listFavorites, setFavorite, removeFavorite, renameFavorite, listTodos, listDueTasks, indexFiles, indexFilesInBatches, removeIndexPaths, removeIndexPrefix, listFileSummaries, listFilesMeta, getFileMeta, listRecentFiles, listNotes, truncateWal } from './index-db.js';
 import { startMcp } from './mcp.js';
 import { buildEmbeddings, embedFiles, deleteEmbeddings, deleteEmbeddingsByPrefix, semanticSearch, embeddingsStatus } from './embed.js';
@@ -54,6 +55,21 @@ app.get('/service_worker.js', async (_req, reply) => {
 });
 
 app.get('/api/tree', async () => buildTree(listFileSummaries(), scanDirs()));
+
+// 只读目录浏览（空间管理「选择目录」弹窗用，见 specs/space-scope/）：单层列目录 + md 篇数。
+// 只接受 BASE_DIR 内的相对路径，隐藏/构建产物目录不列；不读任何文件内容。
+app.get('/api/browse', async (req, reply) => {
+  const rel = String((req.query as any)?.path || '');
+  try {
+    const files = listFileSummaries();
+    const mdCount = (urlPath: string) =>
+      files.reduce((n, f) => (f.urlPath === urlPath || f.urlPath.startsWith(urlPath + '/') ? n + 1 : n), 0);
+    return listBrowseDirs({ baseDir: BASE_DIR, rel, mdCount });
+  } catch (e) {
+    if (e instanceof BrowseError) return reply.code(e.status).send({ error: e.message });
+    throw e;
+  }
+});
 
 app.get('/api/files', async () => listFilesMeta().map((m) => ({ ...m, fsPath: resolveUrlPath(m.urlPath) })));
 
@@ -386,6 +402,19 @@ app.post('/api/sets', async (req, reply) => {
   const list = Array.isArray(body) ? body : (body && body.sets);
   const valid = validateSets(list);
   if (!valid.ok) return reply.code(400).send({ error: valid.error });
+  // 作用域条目必须真的存在于挂载根下（否则扫描/浏览都会静默落空）。
+  for (const s of valid.sets) {
+    for (const d of s.dirs) {
+      const full = path.resolve(BASE_DIR, d);
+      let ok = false;
+      try {
+        ok = fs.statSync(full).isDirectory();
+      } catch {
+        ok = false;
+      }
+      if (!ok) return reply.code(400).send({ error: `目录不存在：${d}（相对挂载根 ${BASE_DIR}）` });
+    }
+  }
   const prevRoots: Root[] = ROOTS.map((r) => ({ ...r }));
   writingSets = true;
   try {

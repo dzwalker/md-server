@@ -41,16 +41,44 @@ function normalizeSets(list: unknown[]): SpaceSet[] {
     .filter((s) => s.id && s.name);
 }
 
-// 由所有 set 的目录并集派生 ROOTS（url = '/' + 目录名）。scanner / index / embed / graph 复用。
+// set.dirs 的条目叫「作用域」（scope）：可以是一级目录名，也可以是挂载根下的子路径，
+// 例如 "notion-archive/学习成长"。它只决定空间「视图」看到哪块内容；
+// 物理 root（扫描根 / URL 前缀 / 资产物理根）永远按作用域的第一段派生，保证文档 urlPath 与磁盘路径一致。
+export function normalizeScope(raw: unknown): string {
+  return String(raw ?? '').trim().replace(/^\/+|\/+$/g, '');
+}
+
+/** 作用域条目的第一段 = 物理 root 名（"notion-archive/学习成长" → "notion-archive"）。 */
+export function rootNameOf(scope: string): string {
+  return normalizeScope(scope).split('/')[0] || '';
+}
+
+/** urlPath 是否落在某个作用域条目下（等于该目录，或该目录里的文档）。 */
+export function inScope(urlPath: string, scope: string): boolean {
+  const s = normalizeScope(scope);
+  if (!s) return false;
+  const p = urlPath.startsWith('/') ? urlPath : '/' + urlPath;
+  return p === '/' + s || p.startsWith('/' + s + '/');
+}
+
+/** 两个作用域条目是否重叠（相等，或一个包含另一个）。 */
+export function scopesOverlap(a: string, b: string): boolean {
+  const x = normalizeScope(a);
+  const y = normalizeScope(b);
+  if (!x || !y) return false;
+  return x === y || x.startsWith(y + '/') || y.startsWith(x + '/');
+}
+
+// 由所有 set 的作用域并集派生 ROOTS（url = '/' + 第一段）。scanner / index / embed / graph 复用。
 export function deriveRoots(sets: SpaceSet[], baseDir = BASE_DIR): Root[] {
   const seen = new Set<string>();
   const out: Root[] = [];
   for (const s of sets) {
     for (const d of s.dirs) {
-      const dir = d.replace(/^\/+|\/+$/g, '');
-      if (!dir || seen.has(dir)) continue;
-      seen.add(dir);
-      out.push({ url: '/' + dir, dir: baseDir + '/' + dir });
+      const top = rootNameOf(d);
+      if (!top || seen.has(top)) continue;
+      seen.add(top);
+      out.push({ url: '/' + top, dir: baseDir + '/' + top });
     }
   }
   return out;
@@ -72,12 +100,11 @@ export function reloadSets(): SpaceSet[] {
   return SETS;
 }
 
-// 某文件的 urlPath 是否属于「参与语义索引」的 set（任一 embed=true 的 set 包含其顶层目录）。
-export function isEmbedEnabled(urlPath: string): boolean {
-  const seg = urlPath.split('/').filter(Boolean)[0] || '';
-  for (const s of SETS) {
+// 某文件的 urlPath 是否属于「参与语义索引」的空间（任一 embed=true 的 set 的作用域包含它）。
+export function isEmbedEnabled(urlPath: string, sets: SpaceSet[] = SETS): boolean {
+  for (const s of sets) {
     if (!s.embed) continue;
-    if (s.dirs.some((d) => d.replace(/^\/+|\/+$/g, '') === seg)) return true;
+    if (s.dirs.some((d) => inScope(urlPath, d))) return true;
   }
   return false;
 }
@@ -105,10 +132,27 @@ export function validateSets(
     for (const d of (Array.isArray(s.dirs) ? s.dirs : []) as string[]) {
       const dd = String(d).trim();
       if (!dd) continue;
-      if (dd.startsWith('/') || dd.includes('/')) {
-        return { ok: false, error: `目录 "${dd}" 只能是根目录下的单个文件夹名（不含 /）` };
+      // 作用域条目：挂载根下的相对路径，可以多段（如 notion-archive/学习成长）。
+      if (dd.includes('\\')) {
+        return { ok: false, error: `目录 "${dd}" 不能包含反斜杠` };
       }
-      if (!dirs.includes(dd)) dirs.push(dd);
+      if (dd.startsWith('/')) {
+        return { ok: false, error: `目录 "${dd}" 必须是挂载根目录下的相对路径（不要以 / 开头）` };
+      }
+      const segs = dd.split('/');
+      if (segs.some((seg) => seg === '' || seg === '.' || seg === '..')) {
+        return { ok: false, error: `目录 "${dd}" 不能包含 ".."、"." 或空段（不要以 / 结尾）` };
+      }
+      const entry = segs.join('/');
+      if (dirs.includes(entry)) continue;
+      const dup = dirs.find((prev) => scopesOverlap(prev, entry));
+      if (dup) {
+        return {
+          ok: false,
+          error: `同一 set 里 "${entry}" 与 "${dup}" 重叠（一个包含另一个），请只保留一个`,
+        };
+      }
+      dirs.push(entry);
     }
     sets.push({ id, name, dirs, embed: s.embed === true });
   }

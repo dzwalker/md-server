@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronUp,
   Folder,
+  FolderPlus,
   Plus,
   Trash2,
   X,
@@ -20,6 +21,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { DirPicker } from '@/components/sidebar/dir-picker';
 
 function idErrorOf(sets: SpaceSet[], index: number): string | null {
   const id = sets[index].id.trim();
@@ -37,8 +39,10 @@ interface SetCardProps {
   onPatch: (index: number, patch: Partial<SpaceSet>) => void;
   onMoveDir: (setIdx: number, dirIdx: number, delta: number) => void;
   onRemoveDir: (setIdx: number, dirIdx: number) => void;
-  onAddDir: (setIdx: number, dir: string) => void;
+  onPickDir: (setIdx: number) => void;
   onRemoveSet: (index: number) => void;
+  /** 添加目录失败的原因（与同空间已有条目重叠等）。 */
+  dirError?: string | null;
 }
 
 function SetCard({
@@ -49,18 +53,10 @@ function SetCard({
   onPatch,
   onMoveDir,
   onRemoveDir,
-  onAddDir,
+  onPickDir,
   onRemoveSet,
+  dirError,
 }: SetCardProps) {
-  const [dirInput, setDirInput] = useState('');
-
-  function submitDir() {
-    const d = dirInput.trim();
-    if (!d) return;
-    onAddDir(index, d);
-    setDirInput('');
-  }
-
   return (
     <div className="mb-2 rounded-lg border bg-card p-2">
       <div className="flex items-center gap-2">
@@ -113,7 +109,9 @@ function SetCard({
         {set.dirs.map((d, di) => (
           <div key={di} className="group flex items-center gap-1 rounded px-0.5 py-0.5 hover:bg-accent">
             <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate font-mono text-xs">{d}</span>
+            <span className="min-w-0 flex-1 truncate font-mono text-xs" title={d}>
+              {d}
+            </span>
             <button
               type="button"
               disabled={di === 0}
@@ -144,20 +142,18 @@ function SetCard({
         ))}
       </div>
 
-      <div className="mt-1.5 flex gap-1">
-        <Input
-          value={dirInput}
-          onChange={(e) => setDirInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') submitDir();
-          }}
-          placeholder="添加文件夹名"
-          className="h-7 flex-1 text-xs"
-        />
-        <Button variant="outline" size="sm" className="h-7" onClick={submitDir} title="添加目录">
-          <Plus className="h-3.5 w-3.5" />
+      <div className="mt-1.5">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 w-full"
+          onClick={() => onPickDir(index)}
+          title="从挂载根目录里选（支持任意层子目录）"
+        >
+          <FolderPlus className="h-3.5 w-3.5" /> 选择目录
         </Button>
       </div>
+      {dirError && <div className="mt-1 px-0.5 text-xs text-destructive">{dirError}</div>}
     </div>
   );
 }
@@ -167,6 +163,9 @@ export function SpacesPanel() {
   const [draft, setDraft] = useState<SpaceSet[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // 「选择目录」弹窗：pickerSet 是正在编辑的 set 下标；addError 是这一轮添加被拒的原因。
+  const [pickerSet, setPickerSet] = useState<number | null>(null);
+  const [addError, setAddError] = useState<{ i: number; msg: string } | null>(null);
 
   useEffect(() => {
     setDraft(sets.map((s) => ({ ...s, dirs: [...s.dirs] })));
@@ -195,13 +194,27 @@ export function SpacesPanel() {
     );
   }
 
-  function addDir(setIdx: number, dir: string) {
-    const d = dir.trim();
-    if (!d) return;
+  // 添加选择器带回的目录：同一 set 内不允许出现「一个包含另一个」的条目（否则树/笔记会重复展示）。
+  function addDirs(setIdx: number, paths: string[]) {
+    const curDirs = draft[setIdx]?.dirs ?? [];
+    const accepted: string[] = [];
+    let err: string | null = null;
+    for (const raw of paths) {
+      const d = raw.trim().replace(/^\/+|\/+$/g, '');
+      if (!d) continue;
+      const conflict = [...curDirs, ...accepted].find(
+        (x) => x === d || x.startsWith(d + '/') || d.startsWith(x + '/'),
+      );
+      if (conflict) {
+        err = `「${d}」与「${conflict}」重叠：同一空间里不能同时包含一个目录和它的子目录`;
+        continue;
+      }
+      accepted.push(d);
+    }
+    setAddError(err ? { i: setIdx, msg: err } : null);
+    if (!accepted.length) return;
     setDraft((cur) =>
-      cur.map((s, i) =>
-        i === setIdx ? (s.dirs.includes(d) ? s : { ...s, dirs: [...s.dirs, d] }) : s,
-      ),
+      cur.map((s, i) => (i === setIdx ? { ...s, dirs: [...s.dirs, ...accepted] } : s)),
     );
   }
 
@@ -266,8 +279,12 @@ export function SpacesPanel() {
             onPatch={patch}
             onMoveDir={moveDir}
             onRemoveDir={removeDir}
-            onAddDir={addDir}
+            onPickDir={(i) => {
+              setAddError(null);
+              setPickerSet(i);
+            }}
             onRemoveSet={removeSet}
+            dirError={addError && addError.i === i ? addError.msg : null}
           />
         ))}
         <Button variant="outline" size="sm" className="h-8 w-full" onClick={addSet}>
@@ -291,9 +308,19 @@ export function SpacesPanel() {
           </div>
         )}
         <div className="mt-1 text-xs text-muted-foreground">
-          目录填写挂载根目录下的文件夹名（无需 /data/ 前缀），可用 ↑↓ 调整顺序。
+          目录从挂载根下选择（支持任意层子目录，如 notion-archive/学习成长），可用 ↑↓ 调整顺序。
         </div>
       </div>
+
+      <DirPicker
+        open={pickerSet !== null}
+        onOpenChange={(o) => {
+          if (!o) setPickerSet(null);
+        }}
+        onConfirm={(paths) => {
+          if (pickerSet !== null) addDirs(pickerSet, paths);
+        }}
+      />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import type {
   Backlink,
+  BrowseResponse,
   DocCreateRequest,
   DocCreateResponse,
   DocRenameRequest,
@@ -96,6 +97,9 @@ export const api = {
 
   sets: () => get<SetsResponse>('/api/sets'),
   saveSets: (sets: SpaceSet[]) => post<SetsResponse>('/api/sets', sets),
+  // 空间管理的「选择目录」弹窗：只读列目录（相对挂载根），单层懒加载。
+  browse: (path = '') =>
+    get<BrowseResponse>(`/api/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
 
   render: (path: string) => get<RenderResult>(`/api/render${path}`),
   // 笔记清单（只读）：侧栏「笔记」面板按当前空间目录汇总 `> note:` 行。

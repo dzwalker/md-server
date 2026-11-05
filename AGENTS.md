@@ -28,7 +28,7 @@
 
 | 模块 | 职责 |
 |---|---|
-| `src/config.ts` | roots 多空间加载/热更、端口、排除目录 |
+| `src/config.ts` | 空间 set（作用域条目可深到子目录）/ root 派生/热更、端口、排除目录（见 `specs/space-scope/`） |
 | `src/scanner.ts` | 扫描 md 文件 → `MdFile` 列表 + 目录树（只读 fs） |
 | `src/index-db.ts` | SQLite 索引与检索：全文/拼音/标签/双链/图谱/收藏/待办 |
 | `src/render.ts` | markdown → HTML 渲染（markdown-it 插件 + KaTeX 数学 + 笔记卡片/行号锚点） |
@@ -38,6 +38,7 @@
 | `src/file-write.ts` | 写 md 的唯一底座：只允许 .md、临时文件 + rename 原子替换、保持属主/属组/权限、mtime 乐观锁（`WriteError` / `statMdFile` / `checkMtimeLock` / `writeFileAtomic`） |
 | `src/r2.ts` | Cloudflare R2 图片存储（S3 兼容）：上传 / 私有桶读代理 `/api/asset/r2/*` / key 白名单（见 `specs/doc-editing/`） |
 | `src/docs.ts` | 正文文档的文件级操作：整篇保存 / 新建 / 改名 + 文件名校验（`saveDocFile` / `createDocFile` / `renameDocFile` / `validateDocBaseName`，见 `specs/doc-editing/`） |
+| `src/browse.ts` | 只读目录浏览（空间管理「选择目录」弹窗用，`GET /api/browse`；见 `specs/space-scope/`） |
 | `src/mcp.ts` | MCP 工具服务（SSE） |
 | `src/index.ts` | HTTP 路由 + 文件 watcher 实时索引 + 启动装配 |
 
