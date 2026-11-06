@@ -54,7 +54,7 @@ import {
 } from '@/components/ui/dialog';
 import { useElementSize } from '@/hooks/use-element-size';
 import { GraphView } from './graph-view';
-import { DocEditor, type DocEditorHandle } from './doc-editor';
+import { DocEditor, type DocEditorHandle, type EditorDraft } from './doc-editor';
 import { EDITOR_MODES, type EditorMode } from './rich-editor-types';
 import { TocPanel } from './toc-panel';
 import {
@@ -143,8 +143,8 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     fileIndex,
     scrollTarget,
     clearScrollTarget,
-    editingPath,
-    editingDirty,
+    editingPaths,
+    dirtyByPath,
     beginEdit,
     endEdit,
     setEditingDirty,
@@ -172,10 +172,16 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   // 正文编辑态（见 specs/doc-editing/）：草稿全文在 DocEditor 内部，这里只管保存/取消与守卫。
   const editorRef = useRef<DocEditorHandle | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
-  // 编辑器的四种模式（文档头右侧切换）：分块 / 源码 / Muya / Milkdown
+  // 编辑器的三种模式（文档头右侧切换）：分块 / 源码 / Milkdown（Muya 已下线）
   // 进入编辑态默认用 Milkdown（Crepe），其它模式按需切换。
   const [editorMode, setEditorMode] = useState<EditorMode>('milkdown');
-  const editing = !!activeDoc && editingPath === activeDoc;
+  /**
+   * 各篇的草稿快照：切走时 DocEditor 卸载前把自己的全文写进这里，切回来再喂回去。
+   * 这样多篇可以同时处于编辑态，切 tab 不会丢草稿、也不会被打断。
+   */
+  const draftsRef = useRef<Map<string, EditorDraft>>(new Map());
+  const editing = !!activeDoc && editingPaths.includes(activeDoc);
+  const editingDirty = !!activeDoc && !!dirtyByPath[activeDoc];
 
   // 正文整篇重注入时的滚动锚点：长文档里 content-visibility 的「记忆尺寸」会随替换丢失，
   // 不做补偿的话保存笔记后可视位置会漂移（见 lib/scroll-anchor.ts）。
@@ -503,12 +509,14 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   const onCancelEditor = useCallback(() => {
     const h = editorRef.current;
     if (h?.isDirty() && !window.confirm('有未保存的修改，确定放弃？')) return;
-    endEdit();
-  }, [endEdit]);
+    if (activeDoc) draftsRef.current.delete(activeDoc);
+    endEdit(activeDoc ?? undefined);
+  }, [activeDoc, endEdit]);
 
   const onEditorSaved = useCallback(async () => {
-    const p = editingPath;
-    endEdit();
+    const p = activeDoc;
+    if (p) draftsRef.current.delete(p);
+    endEdit(p ?? undefined);
     if (!p) return;
     try {
       // 重新拉一次服务端渲染：正文/目录/反链都跟着更新，且与磁盘内容一致。
@@ -518,7 +526,7 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     } catch {
       /* ignore */
     }
-  }, [editingPath, endEdit, cacheRender]);
+  }, [activeDoc, endEdit, cacheRender]);
 
   // 编辑态快捷键：⌘S 保存、Esc 取消（文本框里的 Esc 交给块编辑器收起草稿）。
   useEffect(() => {
@@ -560,11 +568,13 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     }
   }, [editing]);
 
-  // 编辑态永远只属于当前文档：万一 activeDoc 被别处切走（未触发守卫的路径），
-  // 编辑器自动退出，避免草稿挂在一个看不见的文档上。
+  // 关闭 tab 后清掉对应草稿（编辑态由 store 的 openDocs 监听负责收尾）。
   useEffect(() => {
-    if (editingPath && activeDoc && editingPath !== activeDoc) endEdit();
-  }, [activeDoc, editingPath, endEdit]);
+    const open = new Set(openDocs.map((d) => d.path));
+    for (const p of [...draftsRef.current.keys()]) {
+      if (!open.has(p)) draftsRef.current.delete(p);
+    }
+  }, [openDocs]);
 
   // ===== 笔记（`> note: 内容` 一行；见 specs/notes/）=====
 
@@ -676,8 +686,9 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   const measured = contentWidth > 0;
   const w = measured ? contentWidth : 4096;
   const tocFootprint = tocWidth + TOC_GAP;
-  const floatToc = tocOpen && measured && contentWidth < TOC_FLOAT_BREAKPOINT;
-  const inlineToc = tocOpen && !floatToc;
+  // 编辑态一律按「没有目录」处理：不预留 TOC 宽度、也不渲染 TOC（否则正文会被推窄/左移）
+  const floatToc = tocOpen && measured && contentWidth < TOC_FLOAT_BREAKPOINT && !editing;
+  const inlineToc = tocOpen && !floatToc && !editing;
   const mdMax = Math.min(
     MD_MAX_WIDTH,
     Math.max(0, w - PADDING_X - (inlineToc ? tocFootprint : 0)),
@@ -722,7 +733,7 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
                   doc={d}
                   active={d.path === activeDoc}
                   showFilename={showFilename}
-                  dirty={editing && d.path === activeDoc && editingDirty}
+                  dirty={!!dirtyByPath[d.path]}
                   onActivate={() => activateDoc(d.path)}
                   onClose={() => closeDoc(d.path)}
                 />
@@ -802,29 +813,33 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
             </div>
           </>
         )}
-        <Button
-          variant="ghost"
-          size="sm"
-          className={cn('h-8 gap-1.5', tocOpen && 'bg-muted text-foreground')}
-          onClick={() => setTocOpen((v) => !v)}
-          title="目录"
-        >
-          <ListTree className="h-4 w-4" /> 目录
-        </Button>
-        <div className="mx-0.5 h-4 w-px bg-border" />
-        <Layers className="h-4 w-4 text-muted-foreground" />
-        <Button variant="ghost" size="sm" className="h-6 px-1.5 text-xs" onClick={() => tocExpandTo(1)} title="展开到一级">
-          1
-        </Button>
-        <Button variant="ghost" size="sm" className="h-6 px-1.5 text-xs" onClick={() => tocExpandTo(2)} title="展开到二级">
-          2
-        </Button>
-        <Button variant="ghost" size="sm" className="h-6 px-1.5 text-xs" onClick={() => tocExpandTo(3)} title="展开到三级">
-          3
-        </Button>
-        <Button variant="ghost" size="sm" className="h-6 px-1.5 text-xs" onClick={tocOpenAll} title="全部展开">
-          a
-        </Button>
+        {!editing && (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn('h-8 gap-1.5', tocOpen && 'bg-muted text-foreground')}
+              onClick={() => setTocOpen((v) => !v)}
+              title="目录"
+            >
+              <ListTree className="h-4 w-4" /> 目录
+            </Button>
+            <div className="mx-0.5 h-4 w-px bg-border" />
+            <Layers className="h-4 w-4 text-muted-foreground" />
+            <Button variant="ghost" size="sm" className="h-6 px-1.5 text-xs" onClick={() => tocExpandTo(1)} title="展开到一级">
+              1
+            </Button>
+            <Button variant="ghost" size="sm" className="h-6 px-1.5 text-xs" onClick={() => tocExpandTo(2)} title="展开到二级">
+              2
+            </Button>
+            <Button variant="ghost" size="sm" className="h-6 px-1.5 text-xs" onClick={() => tocExpandTo(3)} title="展开到三级">
+              3
+            </Button>
+            <Button variant="ghost" size="sm" className="h-6 px-1.5 text-xs" onClick={tocOpenAll} title="全部展开">
+              a
+            </Button>
+          </>
+        )}
       </div>
 
       <div
@@ -913,8 +928,12 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
                     ref={editorRef}
                     path={activeDoc}
                     mode={editorMode}
+                    initialDraft={draftsRef.current.get(activeDoc)}
+                    onDraft={(d) => {
+                      if (activeDoc) draftsRef.current.set(activeDoc, d);
+                    }}
                     onSaved={() => void onEditorSaved()}
-                    onDirtyChange={setEditingDirty}
+                    onDirtyChange={(v) => setEditingDirty(activeDoc, v)}
                     onError={(msg) => showNotice(msg)}
                   />
                 </div>

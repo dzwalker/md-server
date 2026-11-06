@@ -13,21 +13,23 @@ import { renderExtras } from '@/lib/markdown-extras';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { BlockSourceEditor } from './block-source-editor';
-import { MuyaEditor } from './muya-editor';
 import { MilkdownEditor } from './milkdown-editor';
 import type { EditorMode, RichEditorHandle } from './rich-editor-types';
 
 /**
  * 正文编辑器（见 specs/doc-editing/）。
  *
- * 四种模式（文档头右侧切换）：
+ * 三种模式（文档头右侧切换）：
  * - `blocks`（默认）：单栏分块编辑。空闲块用服务端渲染结果展示，点某一块原地变成带格式装饰的
  *   源码（CodeMirror 6）。**连续的「行内块」（段落/标题/列表/引用/笔记/分割线）会合并成一个
  *   编辑区**，点一下就能同时看到并修改多段；表格/围栏代码/图表/块级公式/原始 HTML/frontmatter/
  *   脚注定义这类「源码 ≠ 渲染结果」的块单独成块，光标进入才显示源码。
  * - `source`：整篇源码（纯文本框）。
- * - `muya` / `milkdown`：第三方富文本编辑器（MarkText 内核 / ProseMirror），用于对照体验；
- *   它们的保存路径是「HTML/DOM → markdown」序列化，会重排原文（见 plan.md 的代价说明）。
+ * - `milkdown`：Milkdown（Crepe，ProseMirror）富文本编辑器（默认）；
+ *   保存路径是 remark 序列化，会重排原文（见 plan.md 的代价说明）。
+ *
+ * 多篇同时编辑：每篇的草稿由父组件按路径保存（`EditorDraft`），切 tab 时本组件卸载前
+ * 把「有改动」的草稿交出去，切回来再通过 `initialDraft` 恢复，不重新读盘。
  *
  * 真源永远是 Markdown 文本：分块编辑只替换被编辑区的源码行，未编辑的行逐字保留。
  */
@@ -213,7 +215,7 @@ interface FrontmatterPart {
 /**
  * 把文档拆成「文档信息（frontmatter）」与「正文」。
  *
- * 编辑态里 frontmatter 不进任何编辑器（Muya/Crepe/CM6 都会把它当普通文本或吃掉），
+ * 编辑态里 frontmatter 不进任何编辑器（Crepe/CM6 都会把它当普通文本或吃掉），
  * 而是单独渲染成一个默认折叠的区域，点开是一个普通 textarea。
  */
 export function splitFrontmatter(text: string): { fm: FrontmatterPart; body: string } {
@@ -242,6 +244,15 @@ export function joinFrontmatter(fm: FrontmatterPart, inner: string, body: string
   return `${fm.open}\n${inner}\n${fm.close}\n${gap}${body}`;
 }
 
+/** 切 tab 时交给父组件的草稿快照（只有「有改动」的才会保存）。 */
+export interface EditorDraft {
+  /** 整篇 markdown（含 frontmatter）。 */
+  text: string;
+  /** 载入时的磁盘原文（用于脏判断）。 */
+  original: string;
+  mtimeMs?: number;
+}
+
 export interface DocEditorHandle {
   /** 保存：force=true 时不带 mtime（用户确认「覆盖保存」）。失败会抛错。 */
   save: (opts?: { force?: boolean }) => Promise<void>;
@@ -251,6 +262,10 @@ export interface DocEditorHandle {
 interface DocEditorProps {
   path: string;
   mode: EditorMode;
+  /** 切回这篇文档时恢复的草稿（有改动才会被保存，所以非空即为「上次没存」）。 */
+  initialDraft?: EditorDraft;
+  /** 卸载（切走 / 关闭）前把未保存的草稿交出去。 */
+  onDraft?: (draft: EditorDraft) => void;
   /** 保存成功：父组件负责退出编辑态并重渲染这篇文档。 */
   onSaved: () => void;
   onDirtyChange?: (dirty: boolean) => void;
@@ -259,7 +274,7 @@ interface DocEditorProps {
 }
 
 export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function DocEditor(
-  { path, mode, onSaved, onDirtyChange, onError },
+  { path, mode, initialDraft, onDraft, onSaved, onDirtyChange, onError },
   ref,
 ) {
   const [segments, setSegments] = useState<Segment[] | null>(null);
@@ -273,6 +288,11 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
   const fmRef = useRef<FrontmatterPart>({ has: false, open: '---', close: '---', inner: '' });
   /** 编辑框里的 YAML 原文（不含分隔线） */
   const [fmInner, setFmInner] = useState('');
+  const fmInnerRef = useRef('');
+  const updateFmInner = useCallback((v: string) => {
+    fmInnerRef.current = v;
+    setFmInner(v);
+  }, []);
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(false);
   const eolRef = useRef('\n');
@@ -283,20 +303,32 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
   /** 最后一次已知的整篇源码：模式切换时用它给目标模式的 state 播种（否则会读到旧值）。 */
   const lastGoodRef = useRef('');
 
-  /** 载入磁盘原文；分块模式还要服务端渲染一次用于切段。 */
+  /** 载入：有草稿就用草稿，否则读磁盘原文；分块模式还要服务端渲染一次用于切段。 */
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const raw = await api.rawFile(path);
-      const eol = raw.content.includes('\r\n') ? '\r\n' : '\n';
-      const text = raw.content.replace(/\r\n/g, '\n');
+      let text: string;
+      let original: string;
+      let mtimeMs: number | undefined;
+      if (initialDraft) {
+        eolRef.current = initialDraft.text.includes('\r\n') ? '\r\n' : '\n';
+        text = initialDraft.text.replace(/\r\n/g, '\n');
+        original = initialDraft.original.replace(/\r\n/g, '\n');
+        mtimeMs = initialDraft.mtimeMs;
+      } else {
+        const raw = await api.rawFile(path);
+        eolRef.current = raw.content.includes('\r\n') ? '\r\n' : '\n';
+        text = raw.content.replace(/\r\n/g, '\n');
+        original = text;
+        mtimeMs = raw.mtimeMs;
+      }
       const { fm, body } = splitFrontmatter(text);
       const r = await api.renderBlock(path, body);
-      eolRef.current = eol;
-      mtimeRef.current = raw.mtimeMs;
-      originalRef.current = text;
+      mtimeRef.current = mtimeMs;
+      originalRef.current = original;
       fmRef.current = fm;
+      fmInnerRef.current = fm.inner;
       setFmInner(fm.inner);
       setSegments(buildSegments(body, r.html));
       setSourceText(body);
@@ -314,6 +346,21 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 卸载（切 tab / 关闭）前把「有改动」的草稿交给父组件，切回来时用 initialDraft 恢复。
+  const onDraftRef = useRef(onDraft);
+  onDraftRef.current = onDraft;
+  useEffect(() => {
+    return () => {
+      if (textRef.current !== originalRef.current) {
+        onDraftRef.current?.({
+          text: textRef.current,
+          original: originalRef.current,
+          mtimeMs: mtimeRef.current,
+        });
+      }
+    };
+  }, []);
 
   /** 正文（不含 frontmatter）：各模式各自持有 */
   const bodyText = useMemo(() => {
@@ -383,8 +430,27 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
     });
   }, []);
 
-  /** 富文本编辑器回调：写 state 的同时更新「最后一次已知内容」。 */
+  /** 用户是否已经在这篇文档里动过（键鼠/输入）。用于区分「载入时的规范化」和真实编辑。 */
+  const touchedRef = useRef(false);
+  const markTouched = useCallback(() => {
+    touchedRef.current = true;
+  }, []);
+
+  /**
+   * 富文本编辑器回调：写 state 的同时更新「最后一次已知内容」。
+   *
+   * Crepe 装载时会把 markdown 重新序列化（列表符号、表格分隔行、空行等被规范化），
+   * 这会在用户什么都没动的情况下就和磁盘原文不同。所以：**在用户没动过、且切换进来之前
+   * 内容本就等于磁盘原文**时，把基线对齐到规范化结果——否则一进编辑态就显示「有未保存改动」，
+   * 还会在 tab 上出现脏标记、关闭时多余地弹确认。
+   */
   const onRichChange = useCallback((v: string) => {
+    if (!touchedRef.current) {
+      const before = joinFrontmatter(fmRef.current, fmInnerRef.current, lastGoodRef.current);
+      if (before === originalRef.current) {
+        originalRef.current = joinFrontmatter(fmRef.current, fmInnerRef.current, v);
+      }
+    }
     lastGoodRef.current = v;
     setRichText(v);
   }, []);
@@ -392,7 +458,7 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
   /** 取保存用的整篇源码：富文本模式同步 flush 一次，避免防抖丢最后几个字。 */
   const currentContent = useCallback(() => {
     let body = bodyText;
-    if (mode === 'muya' || mode === 'milkdown') {
+    if (mode === 'milkdown') {
       try {
         const flushed = richRef.current?.flush?.();
         if (typeof flushed === 'string' && flushed.length) body = flushed;
@@ -449,7 +515,14 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
   }
 
   return (
-    <div className="md-editor">
+    <div
+      className="md-editor"
+      onKeyDown={markTouched}
+      onPaste={markTouched}
+      onCut={markTouched}
+      onDrop={markTouched}
+      onInput={markTouched}
+    >
       {conflict && (
         <div className="md-editor-conflict">
           <span>磁盘上的文件在编辑期间被外部修改过，直接保存会覆盖它。</span>
@@ -473,7 +546,7 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
             value={fmInner}
             spellCheck={false}
             rows={Math.min(12, Math.max(2, fmInner.split('\n').length))}
-            onChange={(e) => setFmInner(e.target.value)}
+            onChange={(e) => updateFmInner(e.target.value)}
           />
         </details>
       )}
@@ -488,8 +561,6 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
             setSourceText(e.target.value);
           }}
         />
-      ) : mode === 'muya' ? (
-        <MuyaEditor key="muya" ref={richRef} value={richText} onChange={onRichChange} />
       ) : mode === 'milkdown' ? (
         <MilkdownEditor key="milkdown" ref={richRef} value={richText} docPath={path} onChange={onRichChange} />
       ) : (
