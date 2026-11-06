@@ -101,7 +101,9 @@ export const api = {
   browse: (path = '') =>
     get<BrowseResponse>(`/api/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
 
-  render: (path: string) => get<RenderResult>(`/api/render${path}`),
+  // raw=1：顺便把原文一起返回（打开文档时缓存，进编辑态就不用再请求 /api/files）
+  render: (path: string, opts?: { raw?: boolean }) =>
+    get<RenderResult>(`/api/render${path}${opts?.raw ? (path.includes('?') ? '&' : '?') + 'raw=1' : ''}`),
   // 笔记清单（只读）：侧栏「笔记」面板按当前空间目录汇总 `> note:` 行。
   notes: (opts?: { dirs?: string[] }) => {
     const p = new URLSearchParams();

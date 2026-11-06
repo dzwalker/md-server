@@ -53,6 +53,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useElementSize } from '@/hooks/use-element-size';
+import { prefetchEditorChunk } from '@/lib/prefetch-editor';
 import { GraphView } from './graph-view';
 import { DocEditor, type DocEditorHandle, type EditorDraft } from './doc-editor';
 import { EDITOR_MODES, type EditorMode } from './rich-editor-types';
@@ -159,6 +160,13 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   // 上一次生效的 mermaid 主题：用于区分「首次挂载」和「用户真的换了主题」。
   const prevMermaidThemeRef = useRef(mermaidTheme);
   const { ref: contentAreaRef, width: contentWidth } = useElementSize<HTMLDivElement>();
+
+  // 预热编辑器 chunk：页面空闲后一次；悬停「编辑」按钮时也触发（两者都幂等）。
+  // 这样点下去时 Crepe 的 JS/CSS 已经在缓存里，不再出现「转圈等下载」。
+  useEffect(() => {
+    const t = window.setTimeout(prefetchEditorChunk, 1500);
+    return () => window.clearTimeout(t);
+  }, []);
   const [backlinks, setBacklinks] = useState<Backlink[]>([]);
   const [outlinks, setOutlinks] = useState<Outlink[]>([]);
   const [tocOpen, setTocOpen] = useState(true);
@@ -332,7 +340,7 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     if (activeRender) return;
     let alive = true;
     api
-      .render(activeDoc)
+      .render(activeDoc, { raw: true })
       .then((r) => {
         if (alive) cacheRender(activeDoc, r);
       })
@@ -365,7 +373,7 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
         const cur = renderRef.current;
         // 文档 mtime 或所在空间的术语表版本没变 → 不重渲染（术语表改动也要即时生效）。
         if (!cur || (cur.mtimeMs === s.mtimeMs && cur.glossaryVersion === s.glossaryVersion)) return;
-        const r = await api.render(activeDoc);
+        const r = await api.render(activeDoc, { raw: true });
         if (alive) {
           // 外部改动触发的整篇重注入：同样保住当前滚动位置。
           markScrollAnchor();
@@ -520,7 +528,7 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     if (!p) return;
     try {
       // 重新拉一次服务端渲染：正文/目录/反链都跟着更新，且与磁盘内容一致。
-      const r = await api.render(p);
+      const r = await api.render(p, { raw: true });
       appliedHtmlRef.current = null;
       cacheRender(p, r);
     } catch {
@@ -594,7 +602,7 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     async (payload: Omit<NoteRequest, 'path' | 'mtimeMs'>, tempEl?: HTMLElement | null) => {
       if (!activeDoc) throw new Error('没有打开的文档');
       const res = await api.saveNote({ path: activeDoc, mtimeMs: activeRender?.mtimeMs, ...payload });
-      const fresh = await api.render(activeDoc);
+      const fresh = await api.render(activeDoc, { raw: true });
       const el = contentRef.current;
       const patched =
         !!el &&
@@ -752,6 +760,8 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
               size="icon"
               className="h-8 w-8 text-muted-foreground"
               onClick={() => beginEdit(activeDoc)}
+              onMouseEnter={prefetchEditorChunk}
+              onFocus={prefetchEditorChunk}
               title="编辑（进入编辑状态）"
             >
               <Pencil className="h-4 w-4" />
@@ -929,6 +939,11 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
                     path={activeDoc}
                     mode={editorMode}
                     initialDraft={draftsRef.current.get(activeDoc)}
+                    preload={
+                      typeof activeRender?.content === 'string'
+                        ? { content: activeRender.content, mtimeMs: activeRender.mtimeMs }
+                        : undefined
+                    }
                     onDraft={(d) => {
                       if (activeDoc) draftsRef.current.set(activeDoc, d);
                     }}
