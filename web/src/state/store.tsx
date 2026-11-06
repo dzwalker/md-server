@@ -148,13 +148,14 @@ interface StoreValue {
   registerTocControl: (c: TocControl | null) => void;
   tocExpandTo: (n: number) => void;
   tocOpenAll: () => void;
-  /** 正在编辑的文档路径（同一时刻最多一篇；null = 预览态）。 */
-  editingPath: string | null;
-  /** 编辑态是否有未保存改动（用于切文档/切空间/关页面时的确认）。 */
-  editingDirty: boolean;
+  /** 正在编辑的文档路径：**可以多篇同时处于编辑态**（切 tab 不打断编辑）。 */
+  editingPaths: string[];
+  /** 每篇编辑中文档的未保存状态（tab 脏标记 / 关闭前确认）。 */
+  dirtyByPath: Record<string, boolean>;
   beginEdit: (path: string) => void;
-  endEdit: () => void;
-  setEditingDirty: (v: boolean) => void;
+  /** 退出某篇（传 path）或全部（不传）的编辑态，并丢掉对应草稿标记。 */
+  endEdit: (path?: string) => void;
+  setEditingDirty: (path: string, v: boolean) => void;
   /** 新建空文档并直接进入编辑态（资源管理器右键菜单用）。 */
   createDoc: (dir: string, name: string) => Promise<{ path: string; title: string }>;
   /** 改名（同目录换基名），打开的 tab / 渲染缓存跟着迁移。 */
@@ -355,49 +356,41 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [refreshFavorites]);
 
   // ---------- 正文编辑态（见 specs/doc-editing/）----------
-  // 同一时刻最多一篇在编辑：草稿全文由编辑器组件自己持有（每次按键都写进 store 会让
-  // 整棵树跟着重渲染），store 只记「谁在编辑 + 有没有未保存改动」，供离开动作做确认。
-  const [editingPath, setEditingPath] = useState<string | null>(null);
-  const [editingDirty, setEditingDirtyState] = useState(false);
-  const editingPathRef = useRef<string | null>(null);
-  const editingDirtyRef = useRef(false);
-  const setEditingDirty = useCallback((v: boolean) => {
-    editingDirtyRef.current = v;
-    setEditingDirtyState(v);
-  }, []);
+  // 允许多篇同时处于编辑态：切 tab 只是切换「当前显示谁」，不退出编辑、不丢草稿。
+  // 草稿全文由编辑器组件自己持有（每次按键写进 store 会让整棵树重渲染），切走时由
+  // DocView 把草稿快照存进 draftsRef，切回来再喂给编辑器恢复。
+  const [editingPaths, setEditingPaths] = useState<string[]>([]);
+  const [dirtyByPath, setDirtyByPath] = useState<Record<string, boolean>>({});
+  const editingPathsRef = useRef<string[]>([]);
+  const dirtyByPathRef = useRef<Record<string, boolean>>({});
   const beginEdit = useCallback((path: string) => {
     if (!path || path.startsWith('/__tools__/')) return;
-    editingPathRef.current = path;
-    setEditingPath(path);
-    setEditingDirty(false);
-  }, [setEditingDirty]);
-  const endEdit = useCallback(() => {
-    editingPathRef.current = null;
-    setEditingPath(null);
-    setEditingDirty(false);
-  }, [setEditingDirty]);
-  /**
-   * 离开当前文档前确认：没有改动就静默退出编辑态；有改动必须用户点头（v1 用系统确认框，
-   * 避免把「确认丢弃」的弹层逻辑散到每个离开入口）。
-   */
-  const confirmLeaveEdit = useCallback(
-    (nextPath?: string | null): boolean => {
-      const cur = editingPathRef.current;
-      if (!cur) return true;
-      if (nextPath === cur) return true;
-      if (!editingDirtyRef.current) {
-        endEdit();
-        return true;
-      }
-      const ok = window.confirm('当前文档有未保存的修改，确定放弃这些修改？');
-      if (ok) endEdit();
-      return ok;
-    },
-    [endEdit],
-  );
+    if (editingPathsRef.current.includes(path)) return;
+    editingPathsRef.current = [...editingPathsRef.current, path];
+    setEditingPaths(editingPathsRef.current);
+  }, []);
+  const endEdit = useCallback((path?: string) => {
+    const next = path
+      ? editingPathsRef.current.filter((p) => p !== path)
+      : [];
+    editingPathsRef.current = next;
+    setEditingPaths(next);
+    const nextDirty: Record<string, boolean> = {};
+    for (const [k, v] of Object.entries(dirtyByPathRef.current)) {
+      if (!path || k !== path) nextDirty[k] = v;
+    }
+    dirtyByPathRef.current = nextDirty;
+    setDirtyByPath(nextDirty);
+  }, []);
+  const setEditingDirty = useCallback((path: string, v: boolean) => {
+    if (dirtyByPathRef.current[path] === v) return;
+    const next = { ...dirtyByPathRef.current, [path]: v };
+    dirtyByPathRef.current = next;
+    setDirtyByPath(next);
+  }, []);
 
+  // 切文档不再需要确认：每篇的草稿都在，切回来接着编。
   const openDoc = useCallback((path: string, title?: string, query?: string | null, anchor?: string) => {
-    if (!confirmLeaveEdit(path)) return;
     dispatch({
       type: 'open',
       path,
@@ -405,22 +398,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       query: query ?? null,
     });
     setScrollTarget(anchor ? { path, anchor } : null);
-  }, [confirmLeaveEdit]);
+  }, []);
 
   const activateDoc = useCallback((path: string) => {
-    if (!confirmLeaveEdit(path)) return;
     dispatch({ type: 'activate', path });
     setScrollTarget(null);
-  }, [confirmLeaveEdit]);
+  }, []);
 
   const clearScrollTarget = useCallback(() => setScrollTarget(null), []);
-  // 批量关闭（侧栏「已打开」里按目录整组关）：组内有正在编辑的那篇时，先确认未保存改动。
+  // 批量关闭（侧栏「已打开」里按目录整组关）：只有「要关掉的文档里有未保存改动」才确认。
   const closeDocs = useCallback((paths: string[]) => {
     if (!paths.length) return;
-    const editing = editingPathRef.current;
-    if (editing && paths.includes(editing) && !confirmLeaveEdit(null)) return;
+    const dirtyClosing = paths.filter((p) => dirtyByPathRef.current[p]);
+    if (dirtyClosing.length > 0) {
+      const names = dirtyClosing.map((p) => p.split('/').pop() || p).slice(0, 3).join('、');
+      const more = dirtyClosing.length > 3 ? ` 等 ${dirtyClosing.length} 篇` : '';
+      if (!window.confirm(`「${names}」${more}有未保存的修改，关闭会丢弃这些修改，确定？`)) return;
+    }
+    for (const p of paths) {
+      if (editingPathsRef.current.includes(p)) endEdit(p);
+    }
     dispatch({ type: 'closeMany', paths });
-  }, [confirmLeaveEdit]);
+  }, [endEdit]);
   const closeDoc = useCallback((path: string) => closeDocs([path]), [closeDocs]);
   const reorderDocs = useCallback(
     (from: number, to: number) => dispatch({ type: 'reorder', from, to }),
@@ -466,8 +465,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // 新建空文档 → 刷新目录树 → 打开并直接进入编辑态。
   const createDoc = useCallback(
     async (dir: string, name: string) => {
-      // 先在本地确认未保存改动：否则会出现「文件已建好但没打开」的半截状态。
-      if (!confirmLeaveEdit(null)) throw new Error('当前文档有未保存的修改，已取消新建');
       const r = await api.createDoc({ dir, name });
       await refreshTree();
       openDoc(r.path, r.title);
@@ -475,13 +472,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refreshData();
       return { path: r.path, title: r.title };
     },
-    [confirmLeaveEdit, refreshTree, openDoc, beginEdit, refreshData],
+    [refreshTree, openDoc, beginEdit, refreshData],
   );
 
   // 改名（同目录换基名）：tabs、渲染缓存、收藏都跟着迁移；引用不自动改写。
   const renameDoc = useCallback(
     async (target: string, name: string) => {
-      if (editingPathRef.current === target) {
+      if (editingPathsRef.current.includes(target)) {
         throw new Error('正在编辑该文档，请先保存或取消后再改名');
       }
       const r = await api.renameDoc({ path: target, name });
@@ -502,6 +499,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     },
     [refreshTree, refreshFavorites, refreshData],
   );
+
+  // tab 被别处关掉（切 set / 侧栏批量关）时，清掉对应的编辑态，避免草稿挂在看不见的文档上。
+  useEffect(() => {
+    const open = new Set(docs.openDocs.map((d) => d.path));
+    const stale = editingPathsRef.current.filter((p) => !open.has(p));
+    for (const p of stale) endEdit(p);
+  }, [docs.openDocs, endEdit]);
 
   // 目录树只在这里取一次（此前 store 与 TreeView 各取一次，重复下载 431KB）。
   useEffect(() => {
@@ -625,15 +629,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [applySet]);
 
   const switchSet = useCallback((id: string) => {
-    // 切空间会把当前 set 的 tab 整体收起来（含正在编辑的那篇）→ 先确认未保存改动。
-    if (!confirmLeaveEdit(null)) return;
+    // 切空间会把当前 set 的 tab 整体收起来（含正在编辑的文档）→ 只有存在未保存改动才确认。
+    const dirty = Object.entries(dirtyByPathRef.current)
+      .filter(([, v]) => v)
+      .map(([k]) => k);
+    if (dirty.length > 0) {
+      const names = dirty.map((p) => p.split('/').pop() || p).slice(0, 3).join('、');
+      const more = dirty.length > 3 ? ` 等 ${dirty.length} 篇` : '';
+      if (!window.confirm(`「${names}」${more}有未保存的修改，切换空间会丢弃这些修改，确定？`)) return;
+    }
+    endEdit();
     try { localStorage.setItem(ACTIVE_SET_KEY, id); } catch { /* ignore */ }
     applySet(id);
     const target = '/set/' + id;
     if (window.location.pathname !== target) {
       try { window.history.pushState(null, '', target); } catch { /* ignore */ }
     }
-  }, [applySet, confirmLeaveEdit]);
+  }, [applySet, endEdit]);
 
   const saveSets = useCallback(
     async (next: SpaceSet[]) => {
@@ -711,8 +723,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       registerTocControl,
       tocExpandTo,
       tocOpenAll,
-      editingPath,
-      editingDirty,
+      editingPaths,
+      dirtyByPath,
       beginEdit,
       endEdit,
       setEditingDirty,
@@ -763,8 +775,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       registerTocControl,
       tocExpandTo,
       tocOpenAll,
-      editingPath,
-      editingDirty,
+      editingPaths,
+      dirtyByPath,
       beginEdit,
       endEdit,
       setEditingDirty,

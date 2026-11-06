@@ -123,3 +123,12 @@
 - [x] 单测：`src/r2.test.ts`（配置解析、key 生成、key 白名单）+ `upload.test.ts` 补统一入口回落与校验（共 8 例）。
 - [x] 无凭证场景实测：上传回落本地（`provider: local`）、`GET /api/asset/r2/*` 返回 404。
 - [ ] 填好凭证后真传一张图 + 代理读回 200（待用户填 `.env`）。
+
+## T14 多篇同时编辑 + 编辑态无目录 + Muya 下线（2026-11-06）
+
+- [x] store：`editingPath/editingDirty` → `editingPaths[]` + `dirtyByPath`；`openDoc/activateDoc` 不再打断编辑，`closeDocs/switchSet` 只对「要丢掉的脏文档」确认一次；tab 被别处关掉时自动清编辑态。
+- [x] DocView：`draftsRef`（按路径存草稿快照 `{text, original, mtimeMs}`）+ `DocEditor.initialDraft` 恢复 + 卸载时 `onDraft` 回传；tab 脏点按 `dirtyByPath` 显示。
+- [x] 编辑态不渲染 TOC、不预留 TOC 宽度，「目录 / 1 / 2 / 3 / a」按钮隐藏（实测 1028 = 1028）。
+- [x] 富文本装载时的序列化规范化不再算用户改动（基线对齐），进编辑态保存按钮保持禁用。
+- [x] 下线 Muya：删除 `muya-editor.tsx`、`EditorMode` 去掉 `muya`、移除 `@muyajs/core` 依赖与对应 CSS/注释。
+- [x] 实测：A/B 两篇同时编辑、切回草稿保留、B 保存后 A 仍在编辑、关闭脏 tab 弹确认、目录开关不影响编辑宽度。

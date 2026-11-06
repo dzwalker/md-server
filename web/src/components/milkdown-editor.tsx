@@ -186,7 +186,7 @@ export const MilkdownEditor = forwardRef<RichEditorHandle, Props>(function Milkd
           },
         },
       });
-      // 与 Muya 同理：内容没变（还是初始 markdown）就不往上层报
+      // 内容没变（还是初始 markdown）就不往上层报，避免一进编辑态就被标成「有改动」
       crepe.on((listener: any) => {
         listener.markdownUpdated((_ctx: unknown, markdown: string) => {
           if (markdown === initialRef.current) return;

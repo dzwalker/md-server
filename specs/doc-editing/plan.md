@@ -91,7 +91,7 @@ segments = [ {kind:'gap', src:['','']}, {kind:'block', cls:'text', src:[...], ht
 |---|---|---|---|---|
 | 分块（默认） | CodeMirror 6 + 服务端渲染 | `md-codemirror-*.js`（490KB） | 逐字真源 | 无（只改被编辑的行） |
 | 源码 | 原生 textarea | 主包 | 逐字真源 | 无 |
-| Muya | `@muyajs/core`（MarkText 内核） | 按需 chunk（约 1.1MB + 依赖） | turndown：HTML→markdown | 表格单元格会被补齐空格（`| A | B |` → `| A   | B   |`），列表符号与正文基本保留 |
+| Muya（**已下线 2026-11-06**） | `@muyajs/core`（MarkText 内核） | 按需 chunk（约 1.1MB + 依赖） | turndown：HTML→markdown | 表格单元格会被补齐空格（`| A | B |` → `| A   | B   |`），列表符号与正文基本保留。下线原因：与 Milkdown 功能重叠、体积大、序列化同样会重排原文 |
 | Milkdown | `@milkdown/crepe`（官方开箱封装） | 按需 chunk（约 1.5MB） | remark 序列化 | 无序列表 `-` → `*`、表格分隔行 `| --- |` → `| - |`、代码块空行等会被规范化 |
 
 ### 3.2.2 frontmatter 与图片（2026-11-04）

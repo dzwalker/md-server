@@ -791,7 +791,7 @@
   box-shadow: 0 1px 3px rgb(0 0 0 / 10%);
 }
 
-/* ==== 富文本编辑器（Muya / Milkdown，按需动态加载）==== */
+/* ==== 富文本编辑器（Milkdown，按需动态加载）==== */
 .md-rich {
   min-height: 60vh;
   border-radius: 8px;
@@ -806,10 +806,6 @@
 }
 .md-rich-milkdown .milkdown {
   box-shadow: none;
-}
-.md-rich-muya .muya-container,
-.md-rich-muya .muya-editor {
-  min-height: 60vh;
 }
 
 /* ==== Milkdown Crepe：把主题变量映射到 md-server 的内容主题上（--md-*）====
