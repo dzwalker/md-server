@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { BlockSourceEditor } from './block-source-editor';
 import { MilkdownEditor } from './milkdown-editor';
 import type { EditorMode, RichEditorHandle } from './rich-editor-types';
+import { getBlockHtml, setBlockHtml } from '@/lib/block-cache';
 
 /**
  * 正文编辑器（见 specs/doc-editing/）。
@@ -264,6 +265,8 @@ interface DocEditorProps {
   mode: EditorMode;
   /** 切回这篇文档时恢复的草稿（有改动才会被保存，所以非空即为「上次没存」）。 */
   initialDraft?: EditorDraft;
+  /** 打开文档时顺手缓存的原文（来自 `/api/render?raw=1`），有它就不用再发一次请求。 */
+  preload?: { content: string; mtimeMs?: number };
   /** 卸载（切走 / 关闭）前把未保存的草稿交出去。 */
   onDraft?: (draft: EditorDraft) => void;
   /** 保存成功：父组件负责退出编辑态并重渲染这篇文档。 */
@@ -274,7 +277,7 @@ interface DocEditorProps {
 }
 
 export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function DocEditor(
-  { path, mode, initialDraft, onDraft, onSaved, onDirtyChange, onError },
+  { path, mode, initialDraft, preload, onDraft, onSaved, onDirtyChange, onError },
   ref,
 ) {
   const [segments, setSegments] = useState<Segment[] | null>(null);
@@ -303,7 +306,29 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
   /** 最后一次已知的整篇源码：模式切换时用它给目标模式的 state 播种（否则会读到旧值）。 */
   const lastGoodRef = useRef('');
 
-  /** 载入：有草稿就用草稿，否则读磁盘原文；分块模式还要服务端渲染一次用于切段。 */
+  // load() 只在挂载时跑一次，用 ref 读当前模式，避免把 mode 放进依赖导致切换模式时重载。
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+
+  /**
+   * 取「分块」用的渲染结果并切段。
+   *
+   * 两个优化：
+   * - 只在 blocks 模式才需要（A1）：Milkdown/源码模式不请求 `/api/render-block`；
+   * - 会话内按 `path + mtime` 缓存（B1）：同一版本反复进出编辑态不重复渲染。
+   */
+  const loadSegments = useCallback(
+    async (body: string, mtimeMs?: number): Promise<Segment[]> => {
+      const cached = getBlockHtml(path, mtimeMs);
+      if (cached) return buildSegments(body, cached);
+      const r = await api.renderBlock(path, body);
+      setBlockHtml(path, mtimeMs, r.html);
+      return buildSegments(body, r.html);
+    },
+    [path],
+  );
+
+  /** 载入：有草稿/预取就用它们，否则读磁盘原文；只有分块模式才需要渲染结果。 */
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
@@ -316,6 +341,12 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
         text = initialDraft.text.replace(/\r\n/g, '\n');
         original = initialDraft.original.replace(/\r\n/g, '\n');
         mtimeMs = initialDraft.mtimeMs;
+      } else if (preload) {
+        // 打开文档时已经缓存过原文：这里零网络，编辑器可以立刻挂上。
+        eolRef.current = preload.content.includes('\r\n') ? '\r\n' : '\n';
+        text = preload.content.replace(/\r\n/g, '\n');
+        original = text;
+        mtimeMs = preload.mtimeMs;
       } else {
         const raw = await api.rawFile(path);
         eolRef.current = raw.content.includes('\r\n') ? '\r\n' : '\n';
@@ -324,18 +355,19 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
         mtimeMs = raw.mtimeMs;
       }
       const { fm, body } = splitFrontmatter(text);
-      const r = await api.renderBlock(path, body);
       mtimeRef.current = mtimeMs;
       originalRef.current = original;
       fmRef.current = fm;
       fmInnerRef.current = fm.inner;
       setFmInner(fm.inner);
-      setSegments(buildSegments(body, r.html));
       setSourceText(body);
       setRichText(body);
       lastGoodRef.current = body;
       setActive(null);
       setConflict(false);
+      // 只有「分块」模式才需要渲染结果（默认 Milkdown 不再白等这一次请求）
+      if (modeRef.current === 'blocks') setSegments(await loadSegments(body, mtimeMs));
+      else setSegments(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : '加载失败');
     } finally {
@@ -398,10 +430,9 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
     // 这里立刻读会读到 flush 之前的值。
     const timer = window.setTimeout(() => {
       if (!alive) return;
-      api
-        .renderBlock(path, lastGoodRef.current)
-        .then((r) => {
-          if (alive) setSegments(buildSegments(lastGoodRef.current, r.html));
+      loadSegments(lastGoodRef.current, mtimeRef.current)
+        .then((segs) => {
+          if (alive) setSegments(segs);
         })
         .catch(() => {
           /* 渲染失败就退回纯源码段 */
@@ -418,7 +449,7 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
       alive = false;
       window.clearTimeout(timer);
     };
-  }, [mode, path]);
+  }, [mode, path, loadSegments]);
 
   const setSegmentSrc = useCallback((index: number, src: string[]) => {
     setSegments((cur) => {

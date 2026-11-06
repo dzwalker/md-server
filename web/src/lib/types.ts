@@ -120,6 +120,8 @@ export interface RenderResult {
   glossaryVersion?: string;
   /** 仅本文档命中了术语时给出。 */
   glossary?: GlossaryPayload | null;
+  /** `?raw=1` 时的原文（打开文档时缓存，进编辑态不再单独请求）。 */
+  content?: string;
   [key: string]: unknown;
 }
 

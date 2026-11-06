@@ -107,12 +107,12 @@ app.get('/api/render/*', async (req, reply) => {
   if (!f || !f.fsPath) return reply.code(404).send({ error: 'not found', path: p });
   // 术语表按「空间 set」作用域聚合（见 specs/glossary/spec.md）：同空间多个术语表合并生效。
   const glossary = glossaryForDoc(f.urlPath);
-  const { html, headings, glossary: glossaryPayload, glossaryVersion } = renderMarkdown(
-    fs.readFileSync(f.fsPath, 'utf8'),
-    f.dir,
-    glossary,
-  );
-  return { ...f, html, headings, glossary: glossaryPayload, glossaryVersion };
+  // 文件本来就要读一次：`?raw=1` 时顺手把原文一起返回，前端打开文档时就能缓存下来，
+  // 进入编辑态就不用再发一次 /api/files（见 specs/doc-editing/ 的「进编辑态加速」）。
+  const src = fs.readFileSync(f.fsPath, 'utf8');
+  const { html, headings, glossary: glossaryPayload, glossaryVersion } = renderMarkdown(src, f.dir, glossary);
+  const wantsRaw = String((req.query as any)?.raw || '') === '1';
+  return { ...f, html, headings, glossary: glossaryPayload, glossaryVersion, ...(wantsRaw ? { content: src } : {}) };
 });
 
 // 笔记（`> note: 内容`）的插入 / 改写 / 删除。业务全部在 notes.ts（只改目标笔记行，

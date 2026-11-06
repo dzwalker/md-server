@@ -132,3 +132,11 @@
 - [x] 富文本装载时的序列化规范化不再算用户改动（基线对齐），进编辑态保存按钮保持禁用。
 - [x] 下线 Muya：删除 `muya-editor.tsx`、`EditorMode` 去掉 `muya`、移除 `@muyajs/core` 依赖与对应 CSS/注释。
 - [x] 实测：A/B 两篇同时编辑、切回草稿保留、B 保存后 A 仍在编辑、关闭脏 tab 弹确认、目录开关不影响编辑宽度。
+
+## T15 进编辑态加速（2026-11-06）
+
+- [x] 服务端 `/api/render/*?raw=1` 顺带返回原文（复用已读的文件内容）。
+- [x] 前端 `api.render` 支持 `raw`；DocView 打开/刷新/保存后都带 `raw: true`，并把原文作为 `preload` 传给 DocEditor（有草稿时草稿优先）。
+- [x] A1：`render-block` 只在 blocks 模式请求；B1：按 `path+mtime` 会话缓存（`lib/block-cache.ts`）。
+- [x] A3：`lib/prefetch-editor.ts` 空闲 1.5s 与悬停/聚焦「编辑」时预热 Crepe chunk + 主题 CSS。
+- [x] 实测（dev，小文档）：进入编辑 1398ms → 351ms；第二次 146ms；点击后无 `/api/files`、无 `/api/render-block`（milkdown 模式）；blocks 模式 render-block 仅 1 次，切回命中缓存。
