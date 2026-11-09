@@ -39,3 +39,4 @@ specs/<feature-slug>/
 - `opened-panel-close/`：侧栏「已打开的文档」——分组头右侧一键关闭该目录下全部已打开文档；每行右侧 × 悬浮出现、只关单篇；当前文档被关后按「左边最近优先」接任（2026-11-05）。
 - `space-scope/`：空间作用域——`set.dirs` 支持任意层子目录（如 `notion-archive/学习成长`），物理 root 仍按第一段派生（urlPath/索引/图片链接零变化）；侧栏树把每个条目渲染成一级节点，笔记/已打开面板按条目分组；术语表与语义索引按前缀判定；空间管理改为「选择目录」弹窗 + `GET /api/browse`（2026-11-05）。
 - `md-link-graph/`：markdown 相对链接进图谱——`links` 增 `kind` 列（wikilink/mdlink），mdlink 目标归一化为 urlPath；反链改路径精确匹配、wikilink 保 basename 兜底；新增 `orphans` / `impact` / `graph_stats`（MCP 5 个工具 + `GET /api/orphans|/api/impact/*|/api/graph-stats`），存量库靠 `links_md_v1` 迁移自动重算（2026-11-09）。
+- `embed-remote-provider/`：语义索引从「进程内 e5-small（卡住事件循环）」改为内网网关 `text-embedding-v4`（与 OpenViking 同款，1024 维）——模型指纹变更自动清表重建、向量存 Float32 BLOB、`SpaceSet.exclude` 做合规排除；learning set 已开启（430 篇，排除 reorg-archived/recruitment，inbox 保留）（2026-11-09）。

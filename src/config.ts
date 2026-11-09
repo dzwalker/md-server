@@ -1,7 +1,11 @@
 import fs from 'node:fs';
 
 export interface Root { url: string; dir: string; }
-export interface SpaceSet { id: string; name: string; dirs: string[]; embed: boolean; }
+export interface SpaceSet {
+  id: string; name: string; dirs: string[]; embed: boolean;
+  /** 语义索引排除项（挂载根下相对路径），仅对 embed=true 生效：如 neolix-mgmt/reorg-archived。 */
+  exclude?: string[];
+}
 
 // set 里填写的目录名都相对于这个挂载父目录（如 /data/workspace/investment）。
 // 用户不需要在 UI 里写 /data/... 前缀，这里统一拼。
@@ -36,7 +40,10 @@ function normalizeSets(list: unknown[]): SpaceSet[] {
       const dirs = Array.isArray(s?.dirs)
         ? [...new Set((s.dirs as unknown[]).map((d) => String(d).trim()).filter(Boolean))]
         : [];
-      return { id: String(s?.id || '').trim(), name: String(s?.name || '').trim(), dirs, embed: s?.embed === true };
+      const exclude = Array.isArray((s as any)?.exclude)
+        ? [...new Set(((s as any).exclude as unknown[]).map((d) => normalizeScope(d)).filter(Boolean))]
+        : [];
+      return { id: String(s?.id || '').trim(), name: String(s?.name || '').trim(), dirs, embed: s?.embed === true, exclude };
     })
     .filter((s) => s.id && s.name);
 }
@@ -104,7 +111,10 @@ export function reloadSets(): SpaceSet[] {
 export function isEmbedEnabled(urlPath: string, sets: SpaceSet[] = SETS): boolean {
   for (const s of sets) {
     if (!s.embed) continue;
-    if (s.dirs.some((d) => inScope(urlPath, d))) return true;
+    if (!s.dirs.some((d) => inScope(urlPath, d))) continue;
+    // exclude 只对「这个 set」生效：把它列掉的目录即使被 embed=true 的 set 覆盖也不进语义索引。
+    if ((s.exclude || []).some((d) => inScope(urlPath, d))) continue;
+    return true;
   }
   return false;
 }
@@ -154,7 +164,16 @@ export function validateSets(
       }
       dirs.push(entry);
     }
-    sets.push({ id, name, dirs, embed: s.embed === true });
+    const exclude: string[] = [];
+    for (const d of (Array.isArray((s as any).exclude) ? (s as any).exclude : []) as string[]) {
+      const dd = normalizeScope(d);
+      if (!dd) continue;
+      if (dd.split('/').some((seg) => seg === '.' || seg === '..') || dd.includes('\\')) {
+        return { ok: false, error: `exclude 目录 "${dd}" 不合法` };
+      }
+      if (!exclude.includes(dd)) exclude.push(dd);
+    }
+    sets.push({ id, name, dirs, embed: s.embed === true, exclude });
   }
   return { ok: true, sets };
 }
