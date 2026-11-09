@@ -53,6 +53,19 @@ npm run dev   # http://localhost:3001
 
 旧的 `roots.json` 映射（`MD_ROOTS` / `MD_ROOTS_FILE`）已由空间 set 取代；老部署如需保留，把 `{url, dir}` 改写成 set 的一级目录条目即可。示例见 [`roots.example.json`](./roots.example.json) 与 [`docker-compose.example.yml`](./docker-compose.example.yml)。
 
+## 部署与配置
+
+`sets.json`（空间 set 布局）与 `.env`（密钥/模型）都是本机配置，不进 git。仓库里只放**模板 + 渲染脚本**（见 [`deploy/`](./deploy/README.md)）：
+
+```bash
+cp .env.example .env && chmod 600 .env   # 首次：填 R2_* / EMBED_* / SET_*
+./deploy/deploy.sh                       # 渲染配置 → 重建镜像/容器 → 健康检查 → 自检
+./deploy/deploy.sh --no-build            # 只改了 sets.json/.env
+node deploy/render-config.mjs --check    # 只校验渲染结果是否与现有 sets.json 一致
+```
+
+> 改了 `.env` **必须重建容器**（`docker compose up -d --force-recreate`）；`restart` 不会重读 `env_file`。
+
 ## 环境变量
 
 > 语义索引的模型指纹（provider / base_url / model / dim）记在索引库 `embed_meta` 表里：**换模型或换维度会自动清空旧向量并重建**，避免不同语义空间的向量混算。向量按文件 `mtime` 增量更新，服务重启不重算。
