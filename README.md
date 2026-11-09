@@ -36,6 +36,15 @@ npm run dev   # http://localhost:3001
 { "id": "study", "name": "📚 学习成长", "dirs": ["notion-archive/学习成长"], "embed": false }
 ```
 
+`embed` 为 true 时该 set 的文档参与语义索引；可再用 `exclude` 把**不能出本机**的目录单独排除（即使它落在同一 set 的作用域里）：
+
+```json
+{ "id": "work", "name": "工作", "dirs": ["work-a", "work-b"], "embed": true,
+  "exclude": ["work-a/reorg-archived", "work-a/recruitment"] }
+```
+
+> `exclude` 是**合规开关**，不是性能开关：列进去的目录不会产生任何向量（可用 `GET /api/embeddings/status` 与库内 `embeddings` 表核验）。完整示例见 [`sets.example.json`](./sets.example.json)。
+
 - `dirs` 里每个条目叫「作用域」：**相对挂载根**（`MD_BASE_DIR`，默认 `/data/workspace`）的目录，可以是一级目录（`investment`），也可以是任意层子目录（`notion-archive/学习成长`）。
 - 物理 root 永远按条目的第一段派生：`notion-archive/学习成长` → URL 前缀 `/notion-archive`、磁盘 `<MD_BASE_DIR>/notion-archive`。因此文档的 urlPath（`/notion-archive/学习成长/a.md`）、图片相对链接、收藏、双链、索引行都不因为空间划分而改变。
 - 切换 set 后，侧栏只显示该 set 的作用域目录（子目录条目显示成一级节点，名字取最后一段）；「笔记」「已打开」面板同口径分组；术语表与语义索引也按作用域前缀生效。
@@ -46,6 +55,9 @@ npm run dev   # http://localhost:3001
 
 ## 环境变量
 
+> 语义索引的模型指纹（provider / base_url / model / dim）记在索引库 `embed_meta` 表里：**换模型或换维度会自动清空旧向量并重建**，避免不同语义空间的向量混算。向量按文件 `mtime` 增量更新，服务重启不重算。
+
+
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `MD_PORT` | `3001` | HTTP 端口 |
@@ -53,7 +65,13 @@ npm run dev   # http://localhost:3001
 | `MD_SETS` | 内置默认 | set 配置 JSON 数组（覆盖 `sets.json`） |
 | `MD_SETS_FILE` | `/app/sets.json` | 空间 set 配置文件名（UI 保存后热加载） |
 | `MD_INDEX_DB` | `/data/index/md-index.db` | SQLite 索引库路径 |
-| `EMBED_MODEL` | `Xenova/multilingual-e5-small` | 语义向量模型 |
+| `EMBED_PROVIDER` | `local` | `local` = 进程内跑 Transformers.js（零外部依赖，**会阻塞事件循环**）；`openai` = 任意 OpenAI 兼容 `/embeddings` 端点 |
+| `EMBED_BASE_URL` | 空 | provider=openai 时的端点基址（如内网网关 `https://<gateway>/v1`） |
+| `EMBED_API_KEY` | 空 | provider=openai 时的 Bearer key（放 `.env`，权限 600，勿提交） |
+| `EMBED_MODEL` | `Xenova/multilingual-e5-small`（local）/ `text-embedding-v4`（openai） | 向量模型 |
+| `EMBED_MODEL_LOCAL` | `Xenova/multilingual-e5-small` | provider=local 时用的本地模型（`EMBED_MODEL` 留作远端模型名） |
+| `EMBED_DIM` | 空 | 期望维度，仅作校验（**不能作为 `dimensions` 参数下发**，网关对 text-embedding 系列会 400） |
+| `EMBED_BATCH` | `16` | 单批条数；DashScope `text-embedding-v4` 上限 **10**，超了报 `batch size is invalid` |
 | `MCP_PORT` | `3002` | MCP SSE 端口 |
 | `R2_ENDPOINT` | 本账号 R2 endpoint | 编辑态图片存储（S3 兼容） |
 | `R2_BUCKET` | `pics` | R2 桶名 |

@@ -1,0 +1,15 @@
+[
+  {
+    "id": "work",
+    "name": "work",
+    "dirs": ["work-a", "work-b"],
+    "embed": true,
+    "exclude": ["work-a/reorg-archived", "work-a/recruitment"]
+  },
+  {
+    "id": "personal",
+    "name": "personal",
+    "dirs": ["investment", "personal"],
+    "embed": false
+  }
+]

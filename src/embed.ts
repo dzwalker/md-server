@@ -15,7 +15,8 @@ const API_KEY = process.env.EMBED_API_KEY || '';
 const LOCAL_MODEL = process.env.EMBED_MODEL_LOCAL || 'Xenova/multilingual-e5-small';
 const REMOTE_MODEL = process.env.EMBED_MODEL || 'text-embedding-v4';
 const DIM = Number(process.env.EMBED_DIM || 0);
-const BATCH = Math.max(1, Math.min(Number(process.env.EMBED_BATCH || 16), 32));
+// 远端网关的单批上限普遍更小（DashScope text-embedding-v4 = 10），默认值按 provider 区分。
+const BATCH = Math.max(1, Math.min(Number(process.env.EMBED_BATCH || (PROVIDER === 'openai' ? 10 : 16)), 32));
 const DB_PATH = process.env.MD_INDEX_DB || '/data/index/md-index.db';
 
 /** 模型指纹：变了就必须清空重建，否则不同维度/空间的向量会混在一起算相似度。 */
