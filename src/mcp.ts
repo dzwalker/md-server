@@ -2,7 +2,7 @@ import express from 'express';
 import { createRequire } from 'node:module';
 import { resolveUrlPath, toMdFile } from './scanner.js';
 import { semanticSearch } from './embed.js';
-import { searchFiles, listTags, listTodos, listDueTasks, getFileMeta } from './index-db.js';
+import { searchFiles, listTags, listTodos, listDueTasks, getFileMeta, backlinks, outlinks, orphans, impact, graphStats } from './index-db.js';
 import { ROOTS } from './config.js';
 import fs from 'node:fs';
 const require = createRequire(import.meta.url);
@@ -76,6 +76,70 @@ server.registerTool('list_due_tasks', {
   const items = listDueTasks();
   const text = items.length ? items.map((t) => `- ${t.task}\n  截止: ${t.due}\n  来源: ${t.source}`).join('\n') : '(无到期任务)';
   return { content: [{ type: 'text', text }] };
+});
+
+server.registerTool('backlinks', {
+  description: '反向链接：列出引用了这篇文档的文档（md 相对链接 + [[双链]] 同口径）',
+  inputSchema: { path: z.string().describe('文档路径，如 /neolix-mgmt/ad/README.md') },
+}, async ({ path }) => {
+  const rows = backlinks(String(path || ''));
+  const text = rows.length
+    ? rows.map((r: any) => `- ${r.title || r.path}\n  路径: ${r.path}\n  方式: ${r.kind}`).join('\n')
+    : '(无反向链接)';
+  return { content: [{ type: 'text', text }] };
+});
+
+server.registerTool('outlinks', {
+  description: '出链：列出这篇文档引用的目标（同一目标聚合，count = 正文出现次数）',
+  inputSchema: { path: z.string().describe('文档路径，如 /neolix-mgmt/ad/README.md') },
+}, async ({ path }) => {
+  const rows = outlinks(String(path || ''));
+  const text = rows.length
+    ? rows.map((r) => `- ${r.target}${r.count > 1 ? ` ×${r.count}` : ''}`).join('\n')
+    : '(无出链)';
+  return { content: [{ type: 'text', text }] };
+});
+
+server.registerTool('orphans', {
+  description: '孤儿文档：没有任何入链的文档（排除 README.md），用于决定补链还是归档',
+  inputSchema: { limit: z.number().optional(), dir: z.string().optional().describe('只看某个目录前缀，如 /neolix-mgmt') },
+}, async ({ limit, dir }) => {
+  const rows = orphans(Number(limit) || 200, dir ? String(dir) : undefined);
+  const text = rows.length
+    ? rows.map((r) => `- ${r.title || r.path}\n  路径: ${r.path}`).join('\n')
+    : '(没有孤儿文档)';
+  return { content: [{ type: 'text', text: `共 ${rows.length} 篇\n${text}` }] };
+});
+
+server.registerTool('impact', {
+  description: '影响面：改动/删除这篇文档会波及哪些文档（沿反链 BFS，depth 1-3）',
+  inputSchema: {
+    path: z.string().describe('文档路径'),
+    depth: z.number().optional().describe('跳数，默认 1（直接引用者），上限 3'),
+  },
+}, async ({ path, depth }) => {
+  const rows = impact(String(path || ''), Number(depth) || 1);
+  const text = rows.length
+    ? rows.map((r) => `- [d${r.depth}] ${r.title || r.path}\n  路径: ${r.path}`).join('\n')
+    : '(没有被任何文档引用，改动安全)';
+  return { content: [{ type: 'text', text: `波及 ${rows.length} 篇\n${text}` }] };
+});
+
+server.registerTool('graph_stats', {
+  description: '图谱体检：边数、悬空链接、入链 Top（最不能写错的文档）、跨分区边矩阵、孤儿数',
+  inputSchema: { limit: z.number().optional(), dir: z.string().optional().describe('只看某个目录前缀，如 /neolix-mgmt') },
+}, async ({ limit, dir }) => {
+  const s: any = graphStats(Number(limit) || 20, dir ? String(dir) : undefined);
+  const lines: string[] = [
+    `文档数: ${s.files} ｜ md 链接边: ${s.mdEdges} ｜ 双链行: ${s.wikilinkRows} ｜ 悬空目标: ${s.danglingTargets} ｜ 孤儿: ${s.orphanCount}`,
+    '',
+    '入链 Top（改动影响最大 / 最该保持准确）:',
+    ...s.topInbound.map((r: any) => `  ${String(r.inbound).padStart(3)} ← ${r.path}`),
+    '',
+    '跨分区引用（活跃区依赖谁）:',
+    ...s.crossSection.map((r: any) => `  ${String(r.count).padStart(3)}  ${r.from} -> ${r.to}`),
+  ];
+  return { content: [{ type: 'text', text: lines.join('\n') }] };
 });
 
 const app = express();

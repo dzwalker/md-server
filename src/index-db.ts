@@ -25,7 +25,7 @@ function init() {
       file_path TEXT, tag TEXT, PRIMARY KEY(file_path, tag)
     );
     CREATE TABLE IF NOT EXISTS links (
-      source TEXT, target TEXT
+      source TEXT, target TEXT, kind TEXT
     );
     CREATE TABLE IF NOT EXISTS favorites (
       path TEXT PRIMARY KEY, pinned INTEGER DEFAULT 0, added_at INTEGER
@@ -40,6 +40,9 @@ function init() {
   const cols = (db.prepare('PRAGMA table_info(files)').all() as any[]).map((c) => c.name);
   if (!cols.includes('pinyin')) db.exec('ALTER TABLE files ADD COLUMN pinyin TEXT');
   if (!cols.includes('name')) db.exec('ALTER TABLE files ADD COLUMN name TEXT');
+  // 迁移：links 补 kind 列（wikilink / mdlink），老库由 migrateLinks 重算时回填
+  const linkCols = (db.prepare('PRAGMA table_info(links)').all() as any[]).map((c) => c.name);
+  if (!linkCols.includes('kind')) db.exec('ALTER TABLE links ADD COLUMN kind TEXT');
   // WAL 上限：checkpoint 后把 WAL 截断到 64MB，避免历史全量重建把 -wal 撑到 GB 级。
   try { db.pragma('journal_size_limit = 67108864'); } catch { /* ignore */ }
   // 双链提取口径迁移：老库用 files.body 重算一次 links（见 migrateLinks 注释）。
@@ -55,6 +58,9 @@ const FTS_ROWID_KEY = 'fts_rowid_v2';
 const LAST_SYNC_KEY = 'last_sync_at';
 // 双链提取口径 v1：排除代码块 / 行内代码里的 `[[...]]`（numpy 数组、shell `[[ ]]` 等假双链）。
 const LINKS_CLEAN_KEY = 'links_clean_v1';
+// 链接抽取口径 v2：除 `[[双链]]` 外，把 markdown 相对链接 `[文本](../x/y.md)` 也入图，
+// 目标归一化成 urlPath（见 specs/md-link-graph/）。
+const LINKS_MD_KEY = 'links_md_v1';
 
 function getMeta(d: any, key: string): string | null {
   const r = d.prepare('SELECT value FROM meta WHERE key=?').get(key) as { value?: string } | undefined;
@@ -66,21 +72,23 @@ function setMeta(d: any, key: string, value: string) {
 }
 
 /**
- * 双链提取口径迁移（v1）：老库把代码里的 `[[...]]` 也当成了双链
- * （numpy `np.array([[1000.]])`、shell `if [[ ... ]]`、行内代码里的示例 `[[...]]`）。
- * 这里用 files 表里已存的正文重算全部 links —— 不重扫磁盘、不改任何 md 文件。
+ * 链接提取口径迁移：v1 排除代码里的假双链，v2 把 markdown 相对链接也入图。
+ * 两个口径都用 files 表里已存的正文重算全部 links —— 不重扫磁盘、不改任何 md 文件。
  * 新库（files 为空）也会直接打上标记，之后由索引流程按新口径写入。
  */
 function migrateLinks(d: any) {
-  if (getMeta(d, LINKS_CLEAN_KEY) === '1') return;
+  const needClean = getMeta(d, LINKS_CLEAN_KEY) !== '1';
+  const needMd = getMeta(d, LINKS_MD_KEY) !== '1';
+  if (!needClean && !needMd) return;
   const rows = d.prepare('SELECT path, body FROM files').all() as { path: string; body: string }[];
   const tx = d.transaction(() => {
     d.prepare('DELETE FROM links').run();
-    const ins = d.prepare('INSERT INTO links(source,target) VALUES(?,?)');
+    const ins = d.prepare('INSERT INTO links(source,target,kind) VALUES(?,?,?)');
     for (const r of rows) {
-      for (const w of extractWikilinks(r.body || '')) ins.run(r.path, w);
+      for (const l of extractLinks(r.body || '', r.path)) ins.run(r.path, l.target, l.kind);
     }
     setMeta(d, LINKS_CLEAN_KEY, '1');
+    setMeta(d, LINKS_MD_KEY, '1');
   });
   tx();
 }
@@ -132,7 +140,7 @@ function makeStatements(d: any) {
     insFile: d.prepare('INSERT INTO files(path,title,dir,frontmatter,body,mtime_ms,size,pinyin,name) VALUES(?,?,?,?,?,?,?,?,?)'),
     insTag: d.prepare('INSERT OR IGNORE INTO tags(file_path,tag) VALUES(?,?)'),
     insFts: d.prepare('INSERT INTO fts(rowid,path,body) VALUES(?,?,?)'),
-    insLink: d.prepare('INSERT INTO links(source,target) VALUES(?,?)'),
+    insLink: d.prepare('INSERT INTO links(source,target,kind) VALUES(?,?,?)'),
     delFts: d.prepare('DELETE FROM fts WHERE rowid IN (SELECT rowid FROM files WHERE path=?)'),
     delTags: d.prepare('DELETE FROM tags WHERE file_path=?'),
     delLinks: d.prepare('DELETE FROM links WHERE source=?'),
@@ -145,7 +153,7 @@ function insertOne(d: any, s: ReturnType<typeof makeStatements>, f: MdFile, body
   const row = s.insFile.run(f.urlPath, f.title, f.dir, JSON.stringify(f.frontmatter || {}), body, f.mtimeMs, f.size, pinyinStr, f.name);
   s.insFts.run(row.lastInsertRowid, f.urlPath, body);
   for (const t of extractTags(f.frontmatter)) s.insTag.run(f.urlPath, t);
-  for (const w of extractWikilinks(body)) s.insLink.run(f.urlPath, w);
+  for (const l of extractLinks(body, f.urlPath)) s.insLink.run(f.urlPath, l.target, l.kind);
 }
 
 function removeOne(s: ReturnType<typeof makeStatements>, urlPath: string) {
@@ -409,15 +417,52 @@ function extractWikilinks(body: string): string[] {
   return out;
 }
 
+/** markdown 相对链接的目标：剔图片/外链/锚点，按文档目录归一化成 urlPath（含 .md）。 */
+export function extractMdLinks(body: string, sourcePath: string): string[] {
+  // `(?<!!)` 跳过图片 `![]()`；只收以 .md 结尾的目标（资源链接是 raw-asset 的职责）。
+  const re = /(?<!!)\[([^\]\n]*)\]\(\s*<?([^)\s>]+?\.md)>?(?:#[^)]*)?\s*\)/g;
+  const prose = stripCode(body);
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(prose))) {
+    let raw = (m[2] || '').trim();
+    if (!raw || raw.startsWith('#')) continue;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) continue; // http: / mailto: / data:
+    try { raw = decodeURI(raw); } catch { /* 保留原样 */ }
+    const dir = path.posix.dirname(sourcePath);
+    const norm = path.posix.normalize(path.posix.join(dir, raw));
+    if (!norm.startsWith('/') || norm.startsWith('/../')) continue;
+    out.push(norm);
+  }
+  return out;
+}
+
+export interface LinkRef {
+  /** wikilink 是正文里写的目标名；mdlink 是归一化后的 urlPath。 */
+  target: string;
+  kind: 'wikilink' | 'mdlink';
+}
+
+/** 一篇正文里全部出链：`[[双链]]` + markdown 相对链接。 */
+export function extractLinks(body: string, sourcePath: string): LinkRef[] {
+  const refs: LinkRef[] = [];
+  for (const w of extractWikilinks(body)) refs.push({ target: w, kind: 'wikilink' });
+  for (const t of extractMdLinks(body, sourcePath)) refs.push({ target: t, kind: 'mdlink' });
+  return refs;
+}
+
+/** 反向链接：mdlink 按 urlPath 精确匹配；wikilink 按目标名（basename 兜底）匹配。 */
 export function backlinks(path: string) {
   const d = init();
-  const name = (path.split('/').pop() || '').replace(/\.md$/i, '');
+  const p = path.startsWith('/') ? path : '/' + path;
+  const name = (p.split('/').pop() || '').replace(/\.md$/i, '');
   const rows = d.prepare(`
-    SELECT DISTINCT l.source AS path, f.title AS title
+    SELECT DISTINCT l.source AS path, f.title AS title, COALESCE(l.kind, 'wikilink') AS kind
     FROM links l LEFT JOIN files f ON f.path = l.source
-    WHERE l.target = ? OR l.target LIKE ?
+    WHERE (COALESCE(l.kind, 'wikilink') = 'mdlink' AND l.target = ?)
+       OR (COALESCE(l.kind, 'wikilink') = 'wikilink' AND (l.target = ? OR l.target LIKE ?))
     ORDER BY l.source
-  `).all(name, '%/' + name);
+  `).all(p, name, '%/' + name);
   return rows;
 }
 
@@ -448,7 +493,138 @@ export function graph() {
   const d = init();
   return {
     nodes: d.prepare('SELECT path, title, dir FROM files ORDER BY path').all(),
-    edges: d.prepare('SELECT source, target FROM links').all(),
+    edges: d.prepare("SELECT source, target, COALESCE(kind,'wikilink') AS kind FROM links").all(),
+  };
+}
+
+/**
+ * 分区名，用于跨分区边统计：取前两段（`neolix-mgmt/data-flywheel`），
+ * 只有两段及以内时退回第一段（`canon`）。一级粒度会把同一空间内的跨专区依赖抹平。
+ */
+function sectionOf(urlPath: string): string {
+  const parts = urlPath.replace(/^\//, '').split('/');
+  if (parts.length >= 3) return parts.slice(0, 2).join('/');
+  return parts.length > 1 ? parts[0] : '(root)';
+}
+
+/**
+ * 零入链文档（排除 README.md 这类纯索引页）。
+ * 入链判定与 backlinks() 同口径：mdlink 精确路径、wikilink 按目标名。
+ */
+export function orphans(limit = 200, dirPrefix?: string) {
+  const d = init();
+  const scope = (dirPrefix || '').replace(/\/+$/, '');
+  const scopeSql = scope ? " AND f.path LIKE ?" : '';
+  const params: any[] = scope ? [scope + '/%', Number(limit) || 200] : [Number(limit) || 200];
+  return d.prepare(`
+    SELECT f.path AS path, f.title AS title, f.dir AS dir
+    FROM files f
+    WHERE f.path <> '/README.md' AND f.path NOT LIKE '%/README.md'${scopeSql}
+      AND NOT EXISTS (
+        SELECT 1 FROM links l
+        WHERE (COALESCE(l.kind,'wikilink') = 'mdlink' AND l.target = f.path)
+           OR (COALESCE(l.kind,'wikilink') = 'wikilink'
+               AND (l.target = f.name OR l.target = replace(f.name,'.md','') OR l.target = replace(f.name,'.markdown','')))
+      )
+    ORDER BY f.path
+    LIMIT ?
+  `).all(...params) as { path: string; title: string; dir: string }[];
+}
+
+/**
+ * 影响面：改动/删除某文档会波及哪些文档（沿反链 BFS，depth 上限 3）。
+ * 返回按层级升序，depth=1 是直接引用者。
+ */
+export function impact(path: string, depth = 1) {
+  const maxDepth = Math.max(1, Math.min(Number(depth) || 1, 3));
+  const start = path.startsWith('/') ? path : '/' + path;
+  const seen = new Map<string, number>();
+  let frontier: string[] = [start];
+  for (let lvl = 1; lvl <= maxDepth && frontier.length; lvl++) {
+    const next: string[] = [];
+    for (const p of frontier) {
+      for (const r of backlinks(p)) {
+        if (r.path === start || seen.has(r.path)) continue;
+        seen.set(r.path, lvl);
+        next.push(r.path);
+      }
+    }
+    frontier = next;
+  }
+  const d = init();
+  const getTitle = d.prepare('SELECT title FROM files WHERE path=?');
+  const rows = [...seen.entries()].map(([p, lvl]) => {
+    const t = getTitle.get(p) as any;
+    return { path: p, title: (t && t.title) || p, depth: lvl };
+  });
+  rows.sort((a, b) => a.depth - b.depth || a.path.localeCompare(b.path));
+  return rows;
+}
+
+/** 图谱体检：边/悬空目标/入链 Top/跨分区边矩阵/孤儿数。给 agent 和巡检用。 */
+export function graphStats(limit = 20, dirPrefix?: string) {
+  const d = init();
+  const scope = (dirPrefix || '').replace(/\/+$/, '');
+  const like = scope ? scope + '/%' : null;
+  const files = (like
+    ? (d.prepare('SELECT COUNT(*) c FROM files WHERE path LIKE ?').get(like) as any).c
+    : (d.prepare('SELECT COUNT(*) c FROM files').get() as any).c);
+  const linkRows = (like
+    ? d.prepare('SELECT source, target, kind FROM links WHERE source LIKE ?').all(like)
+    : d.prepare('SELECT source, target, kind FROM links').all()) as { source: string; target: string; kind: string }[];
+  // 目标解析与标题回填始终用全库（跨分区链接要能落到真实文件），只按 scope 收窄「源」。
+  const allFiles = d.prepare('SELECT path, title, name FROM files').all() as { path: string; title: string; name: string }[];
+  const pathSet = new Set(allFiles.map((f) => f.path));
+  const nameToPath = new Map<string, string[]>();
+  for (const f of allFiles) {
+    const base = f.name || f.path.split('/').pop() || '';
+    for (const key of new Set([base, base.replace(/\.md$/i, ''), base.replace(/\.markdown$/i, '')])) {
+      if (!key) continue;
+      const arr = nameToPath.get(key);
+      if (arr) arr.push(f.path); else nameToPath.set(key, [f.path]);
+    }
+  }
+
+  const inbound = new Map<string, number>();
+  const dangling = new Set<string>();
+  const cross = new Map<string, number>();
+  let mdEdges = 0;
+  for (const e of linkRows) {
+    if (e.kind === 'mdlink') {
+      mdEdges++;
+      if (pathSet.has(e.target)) {
+        inbound.set(e.target, (inbound.get(e.target) || 0) + 1);
+        const a = sectionOf(e.source); const b = sectionOf(e.target);
+        if (a !== b) cross.set(`${a} -> ${b}`, (cross.get(`${a} -> ${b}`) || 0) + 1);
+      } else {
+        dangling.add(e.target);
+      }
+    } else {
+      const hit = nameToPath.get(e.target) || nameToPath.get(e.target.replace(/\.md$/i, ''));
+      if (hit && hit.length) {
+        for (const p of hit) inbound.set(p, (inbound.get(p) || 0) + 1);
+      }
+    }
+  }
+
+  const titleOf = new Map(allFiles.map((f) => [f.path, f.title]));
+  const topInbound = [...inbound.entries()]
+    .map(([p, c]) => ({ path: p, title: titleOf.get(p) || p, inbound: c }))
+    .sort((a, b) => b.inbound - a.inbound || a.path.localeCompare(b.path))
+    .slice(0, Number(limit) || 20);
+
+  return {
+    files,
+    mdEdges,
+    wikilinkRows: linkRows.length - mdEdges,
+    danglingTargets: dangling.size,
+    danglingSample: [...dangling].sort().slice(0, 10),
+    orphanCount: orphans(100000, scope || undefined).length,
+    topInbound,
+    crossSection: [...cross.entries()]
+      .map(([k, c]) => { const [from, to] = k.split(' -> '); return { from, to, count: c }; })
+      .sort((a, b) => b.count - a.count)
+      .slice(0, Number(limit) || 20),
   };
 }
 

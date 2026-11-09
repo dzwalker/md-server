@@ -15,7 +15,7 @@ import { uploadDocImage } from './upload.js';
 import { isSafeR2Key, getR2Object, r2ConfigFromEnv } from './r2.js';
 import { WriteError } from './file-write.js';
 import { listBrowseDirs, BrowseError } from './browse.js';
-import { rebuildIndex, syncIndex, removeIndexPrefixInBatches, searchFiles, listTags, indexStats, backlinks, outlinks, graph, listFavorites, setFavorite, removeFavorite, renameFavorite, listTodos, listDueTasks, indexFiles, indexFilesInBatches, removeIndexPaths, removeIndexPrefix, listFileSummaries, listFilesMeta, getFileMeta, listRecentFiles, listNotes, truncateWal } from './index-db.js';
+import { rebuildIndex, syncIndex, removeIndexPrefixInBatches, searchFiles, listTags, indexStats, backlinks, outlinks, graph, orphans, impact, graphStats, listFavorites, setFavorite, removeFavorite, renameFavorite, listTodos, listDueTasks, indexFiles, indexFilesInBatches, removeIndexPaths, removeIndexPrefix, listFileSummaries, listFilesMeta, getFileMeta, listRecentFiles, listNotes, truncateWal } from './index-db.js';
 import { startMcp } from './mcp.js';
 import { buildEmbeddings, embedFiles, deleteEmbeddings, deleteEmbeddingsByPrefix, semanticSearch, embeddingsStatus } from './embed.js';
 import { createRequire } from 'node:module';
@@ -283,6 +283,14 @@ app.get('/api/outlinks/*', async (req) => {
 });
 
 app.get('/api/graph', async () => graph());
+
+// 图谱查询（specs/md-link-graph/）：孤儿页、改动影响面、体检汇总。
+app.get('/api/orphans', async (req) => orphans(Number((req.query as any)?.limit) || 200, (req.query as any)?.dir ? String((req.query as any).dir) : undefined));
+app.get('/api/impact/*', async (req) => {
+  const p = '/' + ((req.params as any)['*'] as string);
+  return impact(p, Number((req.query as any)?.depth) || 1);
+});
+app.get('/api/graph-stats', async (req) => graphStats(Number((req.query as any)?.limit) || 20, (req.query as any)?.dir ? String((req.query as any).dir) : undefined));
 
 // 允许经 /api/asset/* 内联返回的本地文件类型。除图片/PDF 外，还覆盖正文里常见的
 // 可点击资源：互动 HTML（如 learning-ad 的 Plotly 页）、CSV/JSON/文本、以及生成脚本源码。

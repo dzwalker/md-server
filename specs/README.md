@@ -38,3 +38,4 @@ specs/<feature-slug>/
 - `reading-list-styles/`：阅读态列表样式——Tailwind preflight 把 `ul/ol` 的 `list-style` 重置成 `none`，正文列表退化成缩进段落；在 `.md-content` 里还原 `disc/circle/square` 与 `decimal/lower-alpha/lower-roman`，任务清单项不叠符号，术语表悬浮定义同步修（2026-11-05）。
 - `opened-panel-close/`：侧栏「已打开的文档」——分组头右侧一键关闭该目录下全部已打开文档；每行右侧 × 悬浮出现、只关单篇；当前文档被关后按「左边最近优先」接任（2026-11-05）。
 - `space-scope/`：空间作用域——`set.dirs` 支持任意层子目录（如 `notion-archive/学习成长`），物理 root 仍按第一段派生（urlPath/索引/图片链接零变化）；侧栏树把每个条目渲染成一级节点，笔记/已打开面板按条目分组；术语表与语义索引按前缀判定；空间管理改为「选择目录」弹窗 + `GET /api/browse`（2026-11-05）。
+- `md-link-graph/`：markdown 相对链接进图谱——`links` 增 `kind` 列（wikilink/mdlink），mdlink 目标归一化为 urlPath；反链改路径精确匹配、wikilink 保 basename 兜底；新增 `orphans` / `impact` / `graph_stats`（MCP 5 个工具 + `GET /api/orphans|/api/impact/*|/api/graph-stats`），存量库靠 `links_md_v1` 迁移自动重算（2026-11-09）。
