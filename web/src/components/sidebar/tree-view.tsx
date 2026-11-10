@@ -63,8 +63,15 @@ function TreeNodeRow({ node, style }: NodeRendererProps<TreeNode>) {
   // 不能在菜单项里塞 DialogTrigger。
   const [dialog, setDialog] = useState<NameDialog | null>(null);
   // 菜单关闭时 Radix 会延迟把焦点还给触发元素，会和对话框输入框的自动聚焦打架；
-  // 选中「新建 / 重命名」时打个标记，让下面的 onCloseAutoFocus 跳过这次归还。
-  const dialogOpeningRef = useRef(false);
+  /**
+   * 从右键菜单里打开弹窗的「排队」动作。
+   *
+   * 不能在菜单项 onSelect 里直接 setDialog：那一刻菜单还开着，它的 FocusScope 会在
+   * 关闭/卸载时把焦点收回去，正好抢掉弹窗输入框刚拿到的焦点（表现为「输入框 focus 一下
+   * 就失去焦点」）。改成把动作排到菜单的 onCloseAutoFocus 里执行——那时菜单已经决定完
+   * 焦点去向，我们再开弹窗并 preventDefault 掉「归还给触发元素」。
+   */
+  const pendingOpenRef = useRef<(() => void) | null>(null);
 
   // 「复制文件名」给的是磁盘上的真实文件名（带 .md 扩展名），不是树上显示的文档标题。
   async function onCopyName() {
@@ -89,12 +96,13 @@ function TreeNodeRow({ node, style }: NodeRendererProps<TreeNode>) {
 
   // 打开改名对话框，顺手取「有几篇文档引用了它」用于提醒；拿不到就不提示。
   function onRename() {
-    dialogOpeningRef.current = true;
-    setDialog({ kind: 'rename', refs: null });
-    api
-      .backlinks(d.path)
-      .then((bs) => setDialog((cur) => (cur?.kind === 'rename' ? { ...cur, refs: bs.length } : cur)))
-      .catch(() => {});
+    pendingOpenRef.current = () => {
+      setDialog({ kind: 'rename', refs: null });
+      api
+        .backlinks(d.path)
+        .then((bs) => setDialog((cur) => (cur?.kind === 'rename' ? { ...cur, refs: bs.length } : cur)))
+        .catch(() => {});
+    };
   }
 
   const row = (
@@ -131,22 +139,24 @@ function TreeNodeRow({ node, style }: NodeRendererProps<TreeNode>) {
       {isVirtual ? (
         row
       ) : (
-        <ContextMenu onOpenChange={(o) => { if (o) dialogOpeningRef.current = false; }}>
+        <ContextMenu onOpenChange={(o) => { if (o) pendingOpenRef.current = null; }}>
           <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
           <ContextMenuContent
             className="min-w-44"
             onCloseAutoFocus={(e) => {
-              if (dialogOpeningRef.current) {
-                dialogOpeningRef.current = false;
-                e.preventDefault();
-              }
+              const open = pendingOpenRef.current;
+              pendingOpenRef.current = null;
+              if (!open) return;
+              // 不把焦点还给右键的目标行（否则会抢掉弹窗里输入框的焦点）
+              e.preventDefault();
+              // 等菜单这把 FocusScope 完全卸载，再开弹窗
+              window.requestAnimationFrame(open);
             }}
           >
             {isDir && (
               <ContextMenuItem
                 onSelect={() => {
-                  dialogOpeningRef.current = true;
-                  setDialog({ kind: 'create' });
+                  pendingOpenRef.current = () => setDialog({ kind: 'create' });
                 }}
               >
                 <FilePlus />
