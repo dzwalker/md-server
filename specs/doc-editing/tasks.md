@@ -140,3 +140,10 @@
 - [x] A1：`render-block` 只在 blocks 模式请求；B1：按 `path+mtime` 会话缓存（`lib/block-cache.ts`）。
 - [x] A3：`lib/prefetch-editor.ts` 空闲 1.5s 与悬停/聚焦「编辑」时预热 Crepe chunk + 主题 CSS。
 - [x] 实测（dev，小文档）：进入编辑 1398ms → 351ms；第二次 146ms；点击后无 `/api/files`、无 `/api/render-block`（milkdown 模式）；blocks 模式 render-block 仅 1 次，切回命中缓存。
+
+## T16 修复右键菜单弹窗输入框立刻失焦（2026-11-08）
+
+- [x] 复现：CDP 真实鼠标事件右击目录 → 点「新建」→ 焦点序列 `input → 失焦 → 菜单内容 → body`。
+- [x] 根因：右键菜单（Radix ContextMenu）的 FocusScope 在关闭/卸载时把焦点收回，正好抢掉弹窗自动聚焦。
+- [x] 修法：`pendingOpenRef` 把「打开弹窗」排到菜单 `onCloseAutoFocus`（同时 `preventDefault` 焦点归还），再 `requestAnimationFrame` 打开；`DocNameDialog` 增加 160ms 兜底聚焦（焦点不在弹窗内时才抢）。
+- [x] 实测：新建/重命名弹窗打开后 `document.activeElement` 稳定为输入框（600ms/1200ms 都保持），可输入；新建流程端到端通过（建文件 → 关弹窗 → 进编辑态）。

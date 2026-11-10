@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -45,6 +45,25 @@ export function DocNameDialog({
   const busyRef = useRef(false);
   // Input 是不带 forwardRef 的函数组件，聚焦/全选只能从容器里取 DOM。
   const boxRef = useRef<HTMLDivElement>(null);
+
+  // 兜底：万一还有别的东西在弹窗打开瞬间抢焦点（例如菜单退出动画期间的焦点归还），
+  // 打开后补一次聚焦——只在焦点确实不在弹窗内时才动手，避免打断用户已经开始的点击。
+  useEffect(() => {
+    if (!open) return;
+    const refocus = () => {
+      const box = boxRef.current;
+      const el = box?.querySelector<HTMLInputElement>('input');
+      if (!box || !el) return;
+      const active = document.activeElement;
+      if (active === el) return;
+      if (active && box.parentElement?.contains(active)) return;
+      if (active && document.querySelector('[role="dialog"]')?.contains(active)) return;
+      el.focus();
+      el.select();
+    };
+    const timer = window.setTimeout(refocus, 160);
+    return () => window.clearTimeout(timer);
+  }, [open]);
 
   // 开/关切换时重置输入与错误。这里用渲染期同步 state（React 官方推荐的 props→state 写法），
   // 保证对话框挂载那一刻输入框里已经是 initialName（否则 onOpenAutoFocus 时还是旧值）。
