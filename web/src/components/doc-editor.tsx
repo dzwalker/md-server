@@ -507,8 +507,11 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
       setConflict(false);
       try {
         const content = currentContent().replace(/\n/g, eolRef.current);
-        await api.saveDoc({ path, content, mtimeMs: opts?.force ? undefined : mtimeRef.current });
+        const res = await api.saveDoc({ path, content, mtimeMs: opts?.force ? undefined : mtimeRef.current });
+        // 保存后**不退出编辑态**：把基线（原文 + mtime）更新到刚写入的版本，
+        // 于是脏标记清零、保存按钮变灰，但光标位置/滚动/编辑器实例都保持不变，可以接着写。
         originalRef.current = currentContent();
+        mtimeRef.current = res.mtimeMs;
         onSaved();
       } catch (e) {
         const msg = e instanceof Error ? e.message : '保存失败';
