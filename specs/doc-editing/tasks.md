@@ -147,3 +147,13 @@
 - [x] 根因：右键菜单（Radix ContextMenu）的 FocusScope 在关闭/卸载时把焦点收回，正好抢掉弹窗自动聚焦。
 - [x] 修法：`pendingOpenRef` 把「打开弹窗」排到菜单 `onCloseAutoFocus`（同时 `preventDefault` 焦点归还），再 `requestAnimationFrame` 打开；`DocNameDialog` 增加 160ms 兜底聚焦（焦点不在弹窗内时才抢）。
 - [x] 实测：新建/重命名弹窗打开后 `document.activeElement` 稳定为输入框（600ms/1200ms 都保持），可输入；新建流程端到端通过（建文件 → 关弹窗 → 进编辑态）。
+
+## T17 编辑态排版对齐 + 保存不退出 + 按钮改名（2026-11-11）
+
+- [x] 审计阅读态 vs 编辑态 computed style：修复前 h1 39.4px/weight 400/margin 32 0 0、p 行高 22.5、列表缩进差 24px、引用 margin 9px、代码块 13.1px。
+- [x] 新增 `!important` 覆盖层（Crepe 主题 CSS 运行时注入，同权重会盖掉站内样式）：h1–h6、p、ul/ol/li、blockquote、table、pre、hr、code 全部对齐 `.md-content`。
+- [x] 列表：label 宽度 1.5em、gap 0、行高 1.7em；列表项内 `<p>` 外边距清零；项目符号用 ●/○/▪ 按层级切换。
+- [x] 修复后实测（同一文档）：h1 25.5/33.15/600、h2 21/27.3、p 15/25.5/margin 7.5、blockquote 15 margin、pre 15/25.5/padding 12、code 13.5/22.95、li 行高 26 —— 与阅读态逐项相同。
+- [x] 保存后留在编辑态：`doc-editor.doSave` 更新 `originalRef` 与 `mtimeRef`；`doc-view.onEditorSaved` 只刷预览缓存 + 丢草稿，不再 endEdit。实测保存后仍在编辑、保存按钮变灰、脏点消失、文件已写入。
+- [x] 「取消」改名「结束编辑」（title 同步）；有未保存改动时仍确认。
+- [x] 已知遗留（Milkdown 序列化特性，非本次引入）：段落行首空格会写成 `&#x20;`，阅读态渲染一致但源码里是实体。

@@ -521,20 +521,20 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     endEdit(activeDoc ?? undefined);
   }, [activeDoc, endEdit]);
 
+  // 保存成功：**留在编辑态**（用户要求可以连着写），只做两件事——
+  // 丢掉这篇的草稿快照（磁盘与编辑器已一致），并刷新预览缓存（结束编辑后立刻是新的渲染）。
   const onEditorSaved = useCallback(async () => {
     const p = activeDoc;
     if (p) draftsRef.current.delete(p);
-    endEdit(p ?? undefined);
     if (!p) return;
     try {
-      // 重新拉一次服务端渲染：正文/目录/反链都跟着更新，且与磁盘内容一致。
       const r = await api.render(p, { raw: true });
       appliedHtmlRef.current = null;
       cacheRender(p, r);
     } catch {
       /* ignore */
     }
-  }, [activeDoc, endEdit, cacheRender]);
+  }, [activeDoc, cacheRender]);
 
   // 编辑态快捷键：⌘S 保存、Esc 取消（文本框里的 Esc 交给块编辑器收起草稿）。
   useEffect(() => {
@@ -795,9 +795,9 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
               className="h-8"
               onClick={onCancelEditor}
               disabled={savingEdit}
-              title="取消编辑（不写入文件）"
+              title="结束编辑（不写入文件）"
             >
-              取消
+              结束编辑
             </Button>
             <Button
               size="sm"

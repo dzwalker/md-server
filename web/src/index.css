@@ -859,6 +859,118 @@
 /* 列表标记（圆点/序号/任务框）用次要文字色，与正文形成层次但不至于看不见 */
 .md-editor .md-rich-milkdown .milkdown .milkdown-list-item-block li .label-wrapper { color: var(--md-muted, var(--muted-foreground)); }
 .md-editor .md-rich-milkdown .milkdown .milkdown-list-item-block li .label-wrapper svg { fill: var(--md-muted, var(--muted-foreground)); }
+/* ==== 编辑态排版对齐阅读态（Milkdown/Crepe）====
+   阅读态口径（见上面 .md-content）：15px/1.7；h1 1.7em…、标题 margin 1.2em 0 .6em、weight 600、行高 1.3；
+   段落 margin .5em 0；列表缩进 1.5em、li 间距 .15em；引用/表格/代码块 margin 1em 0。
+   Crepe 自带一套独立排版，且它的主题 CSS 是运行时注入的（同权重会盖掉本文件）——这里统一加
+   !important，保证「编辑时看到的」与「读的时候」一致。 */
+.md-editor .md-rich-milkdown .milkdown .ProseMirror h1,
+.md-editor .md-rich-milkdown .milkdown .ProseMirror h2,
+.md-editor .md-rich-milkdown .milkdown .ProseMirror h3,
+.md-editor .md-rich-milkdown .milkdown .ProseMirror h4,
+.md-editor .md-rich-milkdown .milkdown .ProseMirror h5,
+.md-editor .md-rich-milkdown .milkdown .ProseMirror h6 {
+  color: var(--md-heading, var(--foreground)) !important;
+  margin: 1.2em 0 0.6em !important;
+  padding: 0 !important;
+  font-weight: 600 !important;
+  line-height: 1.3 !important;
+}
+.md-editor .md-rich-milkdown .milkdown .ProseMirror h1 { font-size: 1.7em !important; }
+.md-editor .md-rich-milkdown .milkdown .ProseMirror h2 { font-size: 1.4em !important; }
+.md-editor .md-rich-milkdown .milkdown .ProseMirror h3 { font-size: 1.2em !important; }
+.md-editor .md-rich-milkdown .milkdown .ProseMirror h4 { font-size: 1.05em !important; }
+.md-editor .md-rich-milkdown .milkdown .ProseMirror h5,
+.md-editor .md-rich-milkdown .milkdown .ProseMirror h6 { font-size: 1em !important; }
+.md-editor .md-rich-milkdown .milkdown .ProseMirror p {
+  margin: 0.5em 0 !important;
+  padding: 0 !important;
+  line-height: 1.7 !important;
+}
+/* 列表：Crepe 用自定义 label 节点画标记，几何位置手动对齐阅读态（缩进 1.5em）；
+   列表项内部是 <p>，阅读态的紧凑列表没有段落上下距，这里一并清掉。 */
+.md-editor .md-rich-milkdown .milkdown .ProseMirror ul,
+.md-editor .md-rich-milkdown .milkdown .ProseMirror ol {
+  padding-left: 0 !important;
+  margin: 0.5em 0 !important;
+  list-style: none !important;
+}
+.md-editor .md-rich-milkdown .milkdown .ProseMirror li { margin: 0.15em 0 !important; }
+.md-editor .md-rich-milkdown .milkdown .ProseMirror li > ul,
+.md-editor .md-rich-milkdown .milkdown .ProseMirror li > ol { margin: 0.25em 0 0 !important; }
+.md-editor .md-rich-milkdown .milkdown .ProseMirror .milkdown-list-item-block { margin: 0 !important; padding: 0 !important; }
+.md-editor .md-rich-milkdown .milkdown .ProseMirror .milkdown-list-item-block > .list-item {
+  gap: 0 !important;
+  padding: 0 !important;
+  align-items: flex-start !important;
+}
+.md-editor .md-rich-milkdown .milkdown .ProseMirror .milkdown-list-item-block .children p { margin: 0 !important; }
+.md-editor .md-rich-milkdown .milkdown .ProseMirror .milkdown-list-item-block li .label-wrapper {
+  width: 1.5em !important;
+  height: 1.7em !important;
+  color: var(--md-fg, var(--foreground)) !important;
+}
+.md-editor .md-rich-milkdown .milkdown .ProseMirror .milkdown-list-item-block li .label-wrapper svg {
+  width: 0.9em !important;
+  height: 0.9em !important;
+  fill: currentColor !important;
+}
+/* 项目符号：Crepe 用一个 24×24 的 svg 圆点，尺寸/层级样式都和阅读态的原生 marker 不同。
+   这里把 svg 隐藏，改用文本符号 ●/○/▪（按嵌套层级切换），与阅读态的 disc/circle/square 对齐。 */
+.md-editor .md-rich-milkdown .milkdown .ProseMirror .milkdown-list-item-block li .label-wrapper .milkdown-icon.bullet svg {
+  display: none !important;
+}
+.md-editor .md-rich-milkdown .milkdown .ProseMirror .milkdown-list-item-block li .label-wrapper .milkdown-icon.bullet::before {
+  content: "\2022";
+  font-size: 1em;
+  line-height: 1;
+  display: inline-block;
+}
+.md-editor .md-rich-milkdown .milkdown .ProseMirror ul ul .milkdown-list-item-block li .label-wrapper .milkdown-icon.bullet::before {
+  content: "\25E6";
+}
+.md-editor .md-rich-milkdown .milkdown .ProseMirror ul ul ul .milkdown-list-item-block li .label-wrapper .milkdown-icon.bullet::before {
+  content: "\25AA";
+}
+.md-editor .md-rich-milkdown .milkdown .ProseMirror .milkdown-list-item-block li .label-wrapper .label {
+  padding: 0 !important;
+  height: 1.7em !important;
+  font-size: 1em !important;
+  line-height: 1.7 !important;
+}
+.md-editor .md-rich-milkdown .milkdown .ProseMirror .milkdown-list-item-block li .label-wrapper .checked,
+.md-editor .md-rich-milkdown .milkdown .ProseMirror .milkdown-list-item-block li .label-wrapper .unchecked {
+  height: 1.7em !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.md-editor .md-rich-milkdown .milkdown .ProseMirror .milkdown-list-item-block li .label-wrapper .checked svg,
+.md-editor .md-rich-milkdown .milkdown .ProseMirror .milkdown-list-item-block li .label-wrapper .unchecked svg {
+  width: 1em !important;
+  height: 1em !important;
+}
+/* 引用 / 表格 / 代码块 / 分割线：外边距与阅读态一致 */
+.md-editor .md-rich-milkdown .milkdown .ProseMirror blockquote { margin: 1em 0 !important; }
+.md-editor .md-rich-milkdown .milkdown .ProseMirror table { margin: 1em 0 !important; }
+.md-editor .md-rich-milkdown .milkdown .ProseMirror hr { margin: 1.5em 0 !important; }
+.md-editor .md-rich-milkdown .milkdown .ProseMirror .milkdown-code-block,
+.md-editor .md-rich-milkdown .milkdown .ProseMirror pre {
+  /* Crepe 的代码块外层把字号设成 0.875em，会让 1em 的间距/字号整体缩水，这里拉回阅读态 */
+  font-size: 15px !important;
+}
+.md-editor .md-rich-milkdown .milkdown .ProseMirror pre {
+  margin: 1em 0 !important;
+  padding: 12px !important;
+  border-radius: 6px !important;
+  line-height: 1.7 !important;
+  background: var(--md-code-bg, var(--muted)) !important;
+}
+.md-editor .md-rich-milkdown .milkdown .ProseMirror pre code {
+  font-size: 0.9em !important;
+  line-height: 1.7 !important;
+}
+
 /* 斜杠菜单 / 工具栏里的图标：跟次要文字同色，选中项高亮成强调色 */
 .md-rich-milkdown .milkdown-slash-menu .menu-group li svg {
   color: var(--md-muted, var(--muted-foreground));
