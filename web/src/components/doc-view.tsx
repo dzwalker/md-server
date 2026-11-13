@@ -352,6 +352,32 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     };
   }, [activeDoc, activeRender, cacheRender]);
 
+  // 切回一个已缓存的文档时，先用 /api/stat 轻量校验磁盘 mtime：
+  // 文档在别的 tab 期间被外部改过的话，缓存（以及进编辑态用的 preload）都是旧的，
+  // 既会显示旧内容，保存还会撞 409。mtime/术语表版本变了就重拉一次渲染。
+  useEffect(() => {
+    if (!activeDoc || activeDoc.startsWith('/__tools__/')) return;
+    const cur = renderRef.current;
+    if (!cur) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const s = await api.stat(activeDoc);
+        if (!alive || !s.exists) return;
+        if (s.mtimeMs === cur.mtimeMs && s.glossaryVersion === cur.glossaryVersion) return;
+        const r = await api.render(activeDoc, { raw: true });
+        if (alive) cacheRender(activeDoc, r);
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // 只在切换文档时校验一次；渲染结果变化不触发（避免自激）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDoc, cacheRender]);
+
   // 文件更新时只刷新「当前打开的这篇」：轮询轻量 /api/stat（走索引，毫秒级），
   // mtime 变了才重新拉正文，避免 dataVersion 一变就重注入整篇（大文档会被重复解析几秒）。
   const renderRef = useRef<RenderResult | null>(activeRender);

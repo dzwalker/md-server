@@ -298,6 +298,8 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
   }, []);
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(false);
+  /** 保存失败信息（去掉 conflict 之外的通用错误也在这里常驻显示，直到下次保存成功） */
+  const [saveError, setSaveError] = useState<string | null>(null);
   const eolRef = useRef('\n');
   const mtimeRef = useRef<number | undefined>(undefined);
   const originalRef = useRef('');
@@ -342,11 +344,27 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
         original = initialDraft.original.replace(/\r\n/g, '\n');
         mtimeMs = initialDraft.mtimeMs;
       } else if (preload) {
-        // 打开文档时已经缓存过原文：这里零网络，编辑器可以立刻挂上。
+        // 打开文档时已经缓存过原文：先零网络挂上。但缓存可能是旧的（文档在别的 tab 期间
+        // 被外部改过），所以立刻用 /api/stat 校验一次 mtime：不一致就改读磁盘原文，
+        // 否则保存时必然撞 409（旧 mtime 乐观锁）。
         eolRef.current = preload.content.includes('\r\n') ? '\r\n' : '\n';
         text = preload.content.replace(/\r\n/g, '\n');
         original = text;
         mtimeMs = preload.mtimeMs;
+        try {
+          const st = await api.stat(path);
+          if (st?.exists && typeof st.mtimeMs === 'number' && st.mtimeMs !== mtimeMs) {
+            const raw = await api.rawFile(path);
+            eolRef.current = raw.content.includes('\r\n') ? '\r\n' : '\n';
+            text = raw.content.replace(/\r\n/g, '\n');
+            original = text;
+            mtimeMs = raw.mtimeMs;
+          } else if (st?.exists && typeof st.mtimeMs === 'number') {
+            mtimeMs = st.mtimeMs;
+          }
+        } catch {
+          /* stat 失败就按缓存继续（保存时会由 409 兜底提示） */
+        }
       } else {
         const raw = await api.rawFile(path);
         eolRef.current = raw.content.includes('\r\n') ? '\r\n' : '\n';
@@ -505,6 +523,7 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
       if (loading || loadError) return;
       setSaving(true);
       setConflict(false);
+      setSaveError(null);
       try {
         const content = currentContent().replace(/\n/g, eolRef.current);
         const res = await api.saveDoc({ path, content, mtimeMs: opts?.force ? undefined : mtimeRef.current });
@@ -515,8 +534,11 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
         onSaved();
       } catch (e) {
         const msg = e instanceof Error ? e.message : '保存失败';
+        // 两种失败都要有可见提示：冲突走常驻横幅（带覆盖保存/重新载入），其它错误也常驻一条，
+        // 同时仍通过 onError 抛一次 toast，避免用户以为「点了保存但没反应」。
         if (/外部修改/.test(msg)) setConflict(true);
-        else onError?.(msg);
+        else setSaveError(msg);
+        onError?.(msg);
         throw e;
       } finally {
         setSaving(false);
@@ -558,13 +580,26 @@ export const DocEditor = forwardRef<DocEditorHandle, DocEditorProps>(function Do
       onInput={markTouched}
     >
       {conflict && (
-        <div className="md-editor-conflict">
-          <span>磁盘上的文件在编辑期间被外部修改过，直接保存会覆盖它。</span>
+        <div className="md-editor-conflict" role="alert">
+          <span>
+            保存失败：磁盘上的文件在编辑期间被外部修改过（mtime 不一致），直接保存会覆盖它。
+          </span>
           <Button variant="outline" size="sm" onClick={() => void doSave({ force: true })}>
             覆盖保存
           </Button>
           <Button variant="ghost" size="sm" onClick={() => void load()}>
             放弃修改并重新载入
+          </Button>
+        </div>
+      )}
+      {saveError && (
+        <div className="md-editor-conflict md-editor-error" role="alert">
+          <span>保存失败：{saveError}</span>
+          <Button variant="outline" size="sm" onClick={() => void doSave()}>
+            重试
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setSaveError(null)}>
+            关闭提示
           </Button>
         </div>
       )}
