@@ -10,8 +10,9 @@ import {
   type ReactNode,
 } from 'react';
 import { api } from '@/lib/api';
-import type { Favorite, RenderResult, SpaceSet, TreeNode } from '@/lib/types';
+import type { DocStat, Favorite, RenderResult, SpaceSet, TreeNode } from '@/lib/types';
 import { TOC_WIDTH_DEFAULT, TOC_WIDTH_MAX, TOC_WIDTH_MIN } from '@/lib/toc';
+import { forgetScrollPos, migrateScrollPos } from '@/lib/scroll-positions';
 import { getStoredMermaidTheme, MERMAID_THEME_KEY } from '@/lib/mermaid-themes';
 
 export interface OpenDoc {
@@ -127,6 +128,8 @@ interface StoreValue {
   isPinned: (path: string) => boolean;
   dataVersion: number;
   refreshData: () => void;
+  /** 当前打开文档的轻量状态（`/api/status?path=` 心跳回包）：DocView 据此决定是否重拉正文。 */
+  docStat: DocStat | null;
   sets: SpaceSet[];
   setsLoaded: boolean;
   activeSetId: string;
@@ -417,6 +420,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     for (const p of paths) {
       if (editingPathsRef.current.includes(p)) endEdit(p);
+      // 关掉的 tab 不保留阅读位置：下次打开是全新一遍（见 lib/scroll-positions.ts）。
+      forgetScrollPos(activeSetIdRef.current, p);
     }
     dispatch({ type: 'closeMany', paths });
   }, [endEdit]);
@@ -483,6 +488,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       const r = await api.renameDoc({ path: target, name });
       dispatch({ type: 'rename', from: target, to: r.path, title: r.title });
+      // 阅读位置跟着新路径走。
+      migrateScrollPos(activeSetIdRef.current, target, r.path);
       setRenderCache((cur) => {
         const prev = cur[target];
         if (!prev) return cur;
@@ -543,28 +550,51 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return map;
   }, [tree]);
 
-  // 轮询后端数据版本：磁盘上有文件增删改时，后端 chokidar 重建索引并 +1，
-  // 前端据此自动刷新树/标签等（轻量端点，无全量扫描）。
+  // 轮询后端数据版本 + 当前文档状态：**一次**请求同时喂两个用途
+  // （此前 store 与 DocView 各起一个 5s 定时器，各发一个请求，重复轮询同一件事）。
+  // 磁盘上有增删改时后端 chokidar 重建索引并 +1 dataVersion，前端据此刷新树/标签；
+  // 当前文档的 mtime / 术语表版本变化由 DocView 消费 docStat 决定是否重拉正文。
+  const [docStat, setDocStat] = useState<DocStat | null>(null);
+  const activeDocPathRef = useRef<string | null>(docs.activeDoc);
+  activeDocPathRef.current = docs.activeDoc;
+  const lastVersionRef = useRef<number | null>(null);
+  const tickSeqRef = useRef(0);
+
   useEffect(() => {
     let alive = true;
-    let last: number | null = null;
     const tick = async () => {
+      const seq = ++tickSeqRef.current;
+      const path = activeDocPathRef.current;
       try {
-        const v = (await api.status()).dataVersion;
-        if (!alive) return;
-        if (last !== null && v !== last) refreshData();
-        last = v;
+        const res = await api.status(path ?? undefined);
+        // 切文档 / 已有更新的 tick 时，旧回包直接丢弃（回包顺序可能乱）
+        if (!alive || seq !== tickSeqRef.current) return;
+        if (lastVersionRef.current !== null && res.dataVersion !== lastVersionRef.current) refreshData();
+        lastVersionRef.current = res.dataVersion;
+        // 值没变就返回同一对象，避免每 5s 都触发一次全应用重渲染。
+        const next = res.file ?? null;
+        setDocStat((prev) =>
+          prev && next &&
+          prev.path === next.path &&
+          prev.exists === next.exists &&
+          prev.mtimeMs === next.mtimeMs &&
+          prev.size === next.size &&
+          prev.glossaryVersion === next.glossaryVersion
+            ? prev
+            : next,
+        );
       } catch {
         /* ignore */
       }
     };
+    // 切文档后立刻取一次（否则最多要等 5s 才拿到这篇的状态）
     void tick();
     const id = window.setInterval(tick, 5000);
     return () => {
       alive = false;
       window.clearInterval(id);
     };
-  }, [refreshData]);
+  }, [refreshData, docs.activeDoc]);
 
   const refreshSets = useCallback(async () => {
     try {
@@ -702,6 +732,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       isPinned,
       dataVersion,
       refreshData,
+      docStat,
       sets,
       setsLoaded,
       activeSetId,
@@ -754,6 +785,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       isPinned,
       dataVersion,
       refreshData,
+      docStat,
       sets,
       setsLoaded,
       activeSetId,

@@ -36,6 +36,14 @@ import {
   shiftAnchorLine,
   type ScrollAnchor,
 } from '@/lib/scroll-anchor';
+import {
+  flushScrollPositions,
+  getScrollPos,
+  readScrollPos,
+  setScrollPos,
+  settleElementTop,
+  settleScrollPos,
+} from '@/lib/scroll-positions';
 import { patchNoteCard } from '@/lib/note-patch';
 import { Button } from '@/components/ui/button';
 import {
@@ -77,6 +85,10 @@ interface TabProps {
 
 // 已渲染正文的 DOM 缓存上限（按文档篇数，LRU 淘汰），避免长时间浏览把内存撑大。
 const DOM_CACHE_MAX = 12;
+/** 正文滚动时记录阅读位置的节流窗口（落盘另有 300ms 去抖，见 lib/scroll-positions.ts） */
+const SCROLL_SAVE_DELAY = 200;
+/** 工具型「文档」（图谱等）没有正文块，记阅读位置没意义 */
+const isToolPath = (path: string | null): boolean => !!path && path.startsWith('/__tools__/');
 
 function SortableTab({ doc, active, showFilename, dirty, onActivate, onClose }: TabProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -149,6 +161,8 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     beginEdit,
     endEdit,
     setEditingDirty,
+    activeSetId,
+    docStat,
   } = useStore();
 
   const contentRef = useRef<HTMLDivElement>(null);
@@ -222,12 +236,35 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     restoreScroll();
   }, [activeRender, restoreScroll]);
 
+  /**
+   * 切入某篇文档 / 刷新后首帧：把它上次的阅读位置恢复回来
+   * （行号锚点优先、scrollTop 兜底，见 lib/scroll-positions.ts）。
+   * 注入首帧里屏外块还是 content-visibility 的估值高度，所以按「逐帧校准到稳定」恢复，
+   * 而不是定一次就完事。
+   */
+  const scrollRestoreTokenRef = useRef(0);
+  const restoreSavedScroll = useCallback(
+    (path: string) => {
+      const el = contentRef.current;
+      const scroller = contentAreaRef.current;
+      if (!el || !scroller || !path || isToolPath(path)) return;
+      const pos = getScrollPos(activeSetId, path);
+      if (!pos) return;
+      // 新的一次恢复让上一次还在跑的校准立刻失效（切文档 / 进编辑态后不能继续钉旧锚点）。
+      const token = ++scrollRestoreTokenRef.current;
+      settleScrollPos(el, scroller, pos, () => scrollRestoreTokenRef.current === token);
+    },
+    [activeSetId],
+  );
+
   // 正文注入改为**命令式**：`dangerouslySetInnerHTML` 会让 React 在每次渲染缓存更新时
   // 整篇重写 innerHTML（保存笔记时就是它把公式/图表全部打回未渲染状态 → 闪一下）。
   // 现在由这里决定「什么时候真的需要整篇替换」，笔记保存走局部替换（见 note-patch.ts），
   // 只要 key 没变就不再注入；换了容器节点（如切到图谱再切回）也一定会重新注入。
   const appliedHtmlRef = useRef<{ el: HTMLElement; key: string } | null>(null);
   const contentKey = (path: string | null, html: string) => `${path ?? ''}\u0000${html}`;
+  // 这一篇的「上次阅读位置」是否已经恢复过：切到别的文档时清空，同篇整篇重注入不重复恢复。
+  const restoredPosPathRef = useRef<string | null>(null);
 
   useLayoutEffect(() => {
     const el = contentRef.current;
@@ -236,7 +273,37 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     const key = contentKey(activeDoc, html);
     const applied = appliedHtmlRef.current;
     if (applied && applied.el === el && applied.key === key) return;
-    markScrollAnchor();
+
+    // 这次替换是「换了一篇」还是「同一篇整篇重注入」：两者的滚动处理完全不同。
+    const prevPath = applied ? applied.key.slice(0, applied.key.indexOf('\u0000')) : '';
+    const curPath = activeDoc ?? '';
+    const sameDoc = !!prevPath && prevPath === curPath;
+    const scroller = contentAreaRef.current;
+
+    // 换篇：先把上一篇的阅读位置记下来（此刻正文还是旧文档的 DOM，读到的才是真位置）。
+    // 旧文档正处在编辑态时阅读区是隐藏的（读不到位置），不能拿 0 覆盖已有记录；
+    // 被关掉的 tab（已不在 openDocs 里）也不记：关掉再打开就该从头读。
+    if (
+      !sameDoc &&
+      prevPath &&
+      !isToolPath(prevPath) &&
+      scroller &&
+      !editingPaths.includes(prevPath) &&
+      openDocs.some((d) => d.path === prevPath) &&
+      el.getClientRects().length > 0
+    ) {
+      setScrollPos(activeSetId, prevPath, readScrollPos(el, scroller));
+    }
+
+    // 同一篇整篇重注入（保存笔记 / 外部改动）才保留原来的滚动锚点补偿；
+    // 换篇时旧锚点不能套到新正文上。
+    if (sameDoc) markScrollAnchor();
+    else {
+      scrollAnchorRef.current = null;
+      restoredPosPathRef.current = null;
+      // 换篇：上一次的「位置校准」立刻作废，别把旧文档的锚点继续钉到新正文上。
+      scrollRestoreTokenRef.current += 1;
+    }
     closeActiveNoteEditor();
 
     const cache = domCacheRef.current;
@@ -264,8 +331,103 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
       restoredFromCacheRef.current = false;
     }
     appliedHtmlRef.current = { el, key };
-    restoreScroll();
-  }, [activeRender, activeDoc, activeQuery, markScrollAnchor, restoreScroll]);
+
+    if (sameDoc) restoreScroll();
+    // 恢复这篇上次的阅读位置：必须等**正文真的有内容**的那次注入（打开文档时先是空
+    // html、随后渲染结果到达，两次都会走到这里）；带锚点打开（双链 / ⌘P / 笔记跳转）
+    // 时不恢复，位置交给下面的锚点滚动。
+    if (
+      curPath &&
+      !isToolPath(curPath) &&
+      el.firstChild &&
+      restoredPosPathRef.current !== curPath &&
+      scrollTarget?.path !== curPath
+    ) {
+      restoredPosPathRef.current = curPath;
+      restoreSavedScroll(curPath);
+    }
+  }, [
+    activeRender,
+    activeDoc,
+    activeQuery,
+    activeSetId,
+    editingPaths,
+    openDocs,
+    scrollTarget,
+    markScrollAnchor,
+    restoreScroll,
+    restoreSavedScroll,
+  ]);
+
+  // 进编辑态时阅读区被隐藏（浏览器会把 scrollTop 归零），退出编辑后把那篇的位置找回来。
+  const prevEditingRef = useRef(false);
+  useLayoutEffect(() => {
+    const wasEditing = prevEditingRef.current;
+    prevEditingRef.current = editing;
+    if (editing) {
+      // 阅读区马上要被隐藏：正在跑的位置校准作废（此时量到的都是 0 高度）。
+      scrollRestoreTokenRef.current += 1;
+      return;
+    }
+    if (!wasEditing || !activeDoc) return;
+    restoreSavedScroll(activeDoc);
+  }, [editing, activeDoc, restoreSavedScroll]);
+
+  // 滚动过程中持续记录当前文档的阅读位置（节流），刷新 / 关页回来能接上。
+  useEffect(() => {
+    if (!activeDoc || isToolPath(activeDoc) || editing) return;
+    const scroller = contentAreaRef.current;
+    if (!scroller) return;
+    const path = activeDoc;
+    let timer: number | null = null;
+    const record = () => {
+      const el = contentRef.current;
+      const sc = contentAreaRef.current;
+      // 阅读区被隐藏（编辑态 / 空 set）时量不到真实位置，跳过。
+      if (!el || !sc || el.getClientRects().length === 0) return;
+      setScrollPos(activeSetId, path, readScrollPos(el, sc));
+    };
+    const onScroll = () => {
+      if (timer !== null) return;
+      timer = window.setTimeout(() => {
+        timer = null;
+        record();
+      }, SCROLL_SAVE_DELAY);
+    };
+    scroller.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      scroller.removeEventListener('scroll', onScroll);
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [activeDoc, activeSetId, editing, contentAreaRef]);
+
+  // 关页 / 切后台：把手上的位置立刻落盘（等不到 300ms 去抖）。
+  useEffect(() => {
+    const saveNow = () => {
+      const el = contentRef.current;
+      const sc = contentAreaRef.current;
+      if (
+        el &&
+        sc &&
+        activeDoc &&
+        !isToolPath(activeDoc) &&
+        !editing &&
+        el.getClientRects().length > 0
+      ) {
+        setScrollPos(activeSetId, activeDoc, readScrollPos(el, sc));
+      }
+      flushScrollPositions();
+    };
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') saveNow();
+    };
+    window.addEventListener('pagehide', saveNow);
+    document.addEventListener('visibilitychange', onHide);
+    return () => {
+      window.removeEventListener('pagehide', saveNow);
+      document.removeEventListener('visibilitychange', onHide);
+    };
+  }, [activeDoc, activeSetId, editing]);
 
   // 工具型「文档」（如图谱）用保留路径 /__tools__/... 打开为 tab
   const isTool = !!activeDoc && activeDoc.startsWith('/__tools__/');
@@ -322,10 +484,14 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   useEffect(() => {
     if (!scrollTarget || !activeRender || scrollTarget.path !== activeDoc) return;
     const el = contentRef.current;
-    if (!el) return;
+    const scroller = contentAreaRef.current;
+    if (!el || !scroller) return;
     const targetEl = findAnchor(el, scrollTarget.anchor);
     if (targetEl) {
       targetEl.scrollIntoView({ behavior: 'auto', block: 'start' });
+      // 跳一次不够：屏外块的估值高度补齐会把落点顶偏，按「逐帧校准」钉住（见 lib/scroll-positions.ts）。
+      const token = ++scrollRestoreTokenRef.current;
+      settleElementTop(targetEl, scroller, () => scrollRestoreTokenRef.current === token);
       // 跳到某条笔记（侧栏「笔记」面板）时闪一下，落点才看得见。
       if (targetEl.classList.contains('md-note')) flashNote(targetEl);
     }
@@ -352,34 +518,9 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     };
   }, [activeDoc, activeRender, cacheRender]);
 
-  // 切回一个已缓存的文档时，先用 /api/stat 轻量校验磁盘 mtime：
-  // 文档在别的 tab 期间被外部改过的话，缓存（以及进编辑态用的 preload）都是旧的，
-  // 既会显示旧内容，保存还会撞 409。mtime/术语表版本变了就重拉一次渲染。
-  useEffect(() => {
-    if (!activeDoc || activeDoc.startsWith('/__tools__/')) return;
-    const cur = renderRef.current;
-    if (!cur) return;
-    let alive = true;
-    void (async () => {
-      try {
-        const s = await api.stat(activeDoc);
-        if (!alive || !s.exists) return;
-        if (s.mtimeMs === cur.mtimeMs && s.glossaryVersion === cur.glossaryVersion) return;
-        const r = await api.render(activeDoc, { raw: true });
-        if (alive) cacheRender(activeDoc, r);
-      } catch {
-        /* ignore */
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-    // 只在切换文档时校验一次；渲染结果变化不触发（避免自激）
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeDoc, cacheRender]);
-
-  // 文件更新时只刷新「当前打开的这篇」：轮询轻量 /api/stat（走索引，毫秒级），
-  // mtime 变了才重新拉正文，避免 dataVersion 一变就重注入整篇（大文档会被重复解析几秒）。
+  // 文件更新时只刷新「当前打开的这篇」：状态来自 store 的**唯一**心跳
+  // （`GET /api/status?path=`，见 store.tsx），不再单独轮询 /api/stat。
+  // 切回已缓存文档时的磁盘校验也在同一个心跳里完成（store 在切文档时立刻补取一次）。
   const renderRef = useRef<RenderResult | null>(activeRender);
   renderRef.current = activeRender;
   // 术语浮层（见 specs/glossary/）：正文是命令式注入/局部替换的，监听绑在常驻容器上，
@@ -391,30 +532,25 @@ export function DocView({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   }, []);
   useEffect(() => {
     if (!activeDoc || activeDoc.startsWith('/__tools__/') || editing) return;
+    if (!docStat || !docStat.exists || docStat.path !== activeDoc) return;
+    const cur = renderRef.current;
+    // 还没渲染过：交给上面「首次加载」那个 effect；mtime 与术语表版本都没变：不用重渲染。
+    if (!cur) return;
+    if (cur.mtimeMs === docStat.mtimeMs && cur.glossaryVersion === docStat.glossaryVersion) return;
     let alive = true;
-    const check = async () => {
+    void (async () => {
       try {
-        const s = await api.stat(activeDoc);
-        if (!alive || !s.exists) return;
-        const cur = renderRef.current;
-        // 文档 mtime 或所在空间的术语表版本没变 → 不重渲染（术语表改动也要即时生效）。
-        if (!cur || (cur.mtimeMs === s.mtimeMs && cur.glossaryVersion === s.glossaryVersion)) return;
         const r = await api.render(activeDoc, { raw: true });
-        if (alive) {
-          // 外部改动触发的整篇重注入：同样保住当前滚动位置。
-          markScrollAnchor();
-          cacheRender(activeDoc, r);
-        }
+        // 外部改动触发的整篇重注入：滚动锚点由注入那一步统一保住（同篇重注入会 markScrollAnchor）。
+        if (alive) cacheRender(activeDoc, r);
       } catch {
         /* ignore */
       }
-    };
-    const id = window.setInterval(check, 5000);
+    })();
     return () => {
       alive = false;
-      window.clearInterval(id);
     };
-  }, [activeDoc, cacheRender, markScrollAnchor, editing]);
+  }, [docStat, activeDoc, cacheRender, editing]);
 
   useEffect(() => {
     if (!activeDoc || activeDoc.startsWith('/__tools__/')) {

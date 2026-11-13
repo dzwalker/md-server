@@ -40,3 +40,5 @@ specs/<feature-slug>/
 - `space-scope/`：空间作用域——`set.dirs` 支持任意层子目录（如 `notion-archive/学习成长`），物理 root 仍按第一段派生（urlPath/索引/图片链接零变化）；侧栏树把每个条目渲染成一级节点，笔记/已打开面板按条目分组；术语表与语义索引按前缀判定；空间管理改为「选择目录」弹窗 + `GET /api/browse`（2026-11-05）。
 - `md-link-graph/`：markdown 相对链接进图谱——`links` 增 `kind` 列（wikilink/mdlink），mdlink 目标归一化为 urlPath；反链改路径精确匹配、wikilink 保 basename 兜底；新增 `orphans` / `impact` / `graph_stats`（MCP 5 个工具 + `GET /api/orphans|/api/impact/*|/api/graph-stats`），存量库靠 `links_md_v1` 迁移自动重算（2026-11-09）。
 - `embed-remote-provider/`：语义索引从「进程内 e5-small（卡住事件循环）」改为内网网关 `text-embedding-v4`（与 OpenViking 同款，1024 维）——模型指纹变更自动清表重建、向量存 Float32 BLOB、`SpaceSet.exclude` 做合规排除；learning set 已开启（430 篇，排除 reorg-archived/recruitment，inbox 保留）（2026-11-09）。
+- `tab-scroll-restore/`：切 tab / 刷新 / 切空间 set 回来保留每篇文档的阅读位置——`md-scroll-pos-by-set`（按 set 分槽，与 `md-open-tabs-by-set` 同构），值 = scrollTop + 视口首块行号/偏移，恢复时逐帧校准到稳定；关 tab 丢弃、改名迁移（2026-11-13）。
+- `single-heartbeat/`：阅读态两个 5s 轮询（`/api/status` 取 `dataVersion` + `/api/stat?path=` 校验当前文档）合并成**一个**心跳——`GET /api/status?path=` 一次回包同时给两者，切文档立刻补取；`/api/status` 不带 path 时回包不变、`/api/stat` 保留（2026-11-13）。

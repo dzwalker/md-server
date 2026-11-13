@@ -7,6 +7,7 @@ import type {
   DocRenameResponse,
   DocSaveRequest,
   DocSaveResponse,
+  DocStat,
   Favorite,
   GraphData,
   NoteRequest,
@@ -68,7 +69,12 @@ async function del<T>(url: string): Promise<T> {
 export const api = {
   tree: () => get<TreeNode[]>('/api/tree'),
 
-  status: () => get<{ dataVersion: number }>('/api/status'),
+  // 唯一的常驻心跳（见 store.tsx）：dataVersion 判断全局增删改，带 path 时同时给出当前文档状态，
+  // 不必再单独轮询 /api/stat。
+  status: (path?: string) =>
+    get<{ dataVersion: number; file?: DocStat }>(
+      `/api/status${path ? `?path=${encodeURIComponent(path)}` : ''}`,
+    ),
 
   search: (q: string, opts?: { tag?: string; dir?: string; limit?: number }) => {
     const p = new URLSearchParams({ q });
@@ -161,10 +167,7 @@ export const api = {
   // 块级实时预览（只读）：把一块源码按该文档的目录/术语表上下文渲染成 HTML。
   renderBlock: (path: string, markdown: string) =>
     post<RenderBlockResponse>('/api/render-block', { path, markdown }),
-  stat: (path: string) =>
-    get<{ exists: boolean; path: string; mtimeMs?: number; size?: number; glossaryVersion?: string }>(
-      `/api/stat?path=${encodeURIComponent(path)}`,
-    ),
+  stat: (path: string) => get<DocStat>(`/api/stat?path=${encodeURIComponent(path)}`),
   backlinks: (path: string) => get<Backlink[]>(`/api/backlinks${path}`),
   outlinks: (path: string) => get<Outlink[]>(`/api/outlinks${path}`),
 

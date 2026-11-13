@@ -33,7 +33,7 @@ whenToUse: 需要理解或修改 md-server 结构时（web/ 前端 React 工程�
 | 区域 | 文件 | 职责 |
 |---|---|---|
 | 入口/布局 | `src/App.tsx` | 三栏可拖拽布局、移动端抽屉、全局快捷键（⌘P 命令面板 / ⌘O 已打开文档看板 / ⌘B 侧栏） |
-| 状态 | `src/state/store.tsx` | 全局 store：打开的 tab（localStorage 持久化）、树、收藏、空间 set、主题/TOC 宽度等偏好 |
+| 状态 | `src/state/store.tsx` | 全局 store：打开的 tab（localStorage 持久化）、树、收藏、空间 set、主题/TOC 宽度等偏好；关 tab 丢弃阅读位置（`forgetScrollPos`）、改名迁移（`migrateScrollPos`） |
 | 弹层 | `src/components/command-palette.tsx` | ⌘P：空态「最近更新」（`/api/recent`，当前空间最近 20 篇），输入后走 `/api/search` |
 | 弹层 | `src/components/opened-switcher.tsx` | ⌘O：已打开文档看板，一列 = 一个一级目录，`←→↑↓` 导航 + Enter 打开 |
 | 侧栏 | `src/components/sidebar*.tsx` | 资源管理器（react-arborist，文件树右键菜单：复制文件名/复制完整路径/下载/重命名，目录节点「新建 Markdown 文件」，见 `specs/explorer-context-menu/`、`specs/doc-editing/`）/ 已打开 / 标签 / 收藏 / 空间 / 设置 |
@@ -52,6 +52,7 @@ whenToUse: 需要理解或修改 md-server 结构时（web/ 前端 React 工程�
 | 库 | `src/lib/notes.ts` | 笔记右键定位（`resolveNoteContext`）+ 就地编辑器（`startInsertEditor` / `startNoteEditor` / `closeActiveNoteEditor`，命令式 DOM） |
 | 库 | `src/lib/note-patch.ts` | 保存笔记时只替换目标那张卡片（整篇 DOM 不动 → 公式/图表不闪），并重编号下方块行号（见 `specs/notes/plan.md` §7） |
 | 库 | `src/lib/scroll-anchor.ts` | 正文整篇重注入时的滚动位置保持（content-visibility 估值漂移的补偿，见 `specs/notes/plan.md` §5） |
+| 库 | `src/lib/scroll-positions.ts` | 每篇文档阅读位置的持久化（`md-scroll-pos-by-set`，按 set 分槽；行号锚点 + scrollTop，逐帧校准恢复），见 `specs/tab-scroll-restore/` |
 
 - 依赖 API：`/api/tree` `/api/files` `/api/files/*` `/api/render/*`（含 `glossary`）`/api/stat`（含 `glossaryVersion`）`/api/notes`（POST，写笔记行）`/api/docs`（POST 整篇保存）`/api/docs/create`（POST 新建）`/api/docs/rename`（POST 改名）`/api/render-block`（POST 块级预览，只读）`/api/asset/upload`（POST 图片上传，二进制 body）`/api/asset/r2/*`（GET R2 私有桶读代理）`/api/search` `/api/search-semantic` `/api/recent` `/api/tags` `/api/backlinks/*` `/api/outlinks/*` `/api/graph` `/api/favorites` `/api/todos` `/api/sets` `/api/status` `/api/asset/*`
 - 渲染库：按需加载 `/media/*`（katex / mermaid / highlight）；编辑器：`web/src/lib/md-codemirror.ts` 只在进入编辑态时动态加载（`md-codemirror-*.js`）

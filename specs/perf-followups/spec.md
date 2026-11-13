@@ -44,7 +44,7 @@
 - [x] 静态资源长缓存：`/assets/*` = `public, max-age=31536000, immutable`、`/media/*` = `public, max-age=604800`；`/api/*` 与 HTML 保持 `no-cache`。
 - [~] 864KB bitable 文档「点击→正文」**6.8s → 5.3s**（未达 <2.5s 目标）：实测瓶颈是浏览器对 45,750 个元素/42,935 个表格单元格的样式+布局（解析只用 103ms），已试 `table-layout:fixed`、`contain`、行级 `content-visibility` 均无效（详见 `tasks.md` 归因段）。剩余优化需行级虚拟化或归档侧拆表。
 - [~] 19 张 mermaid 文档：首屏图表数从 19 张降到 **3 张**（点击→正文 2.38s → **1.56s**，首图 2.94s）；其余随滚动渲染，功能（放大/导出）不变。若要求「首图 <1s」需进一步压缩首屏 3 张的 eager 数量。
-- [x] 外部改动不影响当前文档时零重渲染：静置 20s 仅 `/api/status`×4 + `/api/stat`×4，无 `/api/render` 重注入。
+- [x] 外部改动不影响当前文档时零重渲染：静置 20s 仅 `/api/status`×4 + `/api/stat`×4，无 `/api/render` 重注入。（2026-11-13 起两者合并为单心跳：静置 20s 只有 `/api/status?path=`×4，见 `specs/single-heartbeat/`。）
 
 ### W2 索引库回收
 

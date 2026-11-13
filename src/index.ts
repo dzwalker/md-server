@@ -91,14 +91,18 @@ app.get('/api/files/*', async (req, reply) => {
   return { ...f, content: fs.readFileSync(f.fsPath, 'utf8') };
 });
 
-// 轻量文档状态：供前端判断「当前打开的文档是否真的变了」，避免 dataVersion 变化就重注入整篇正文。
+// 单篇文档的轻量状态：供前端判断「当前打开的文档是否真的变了」，避免 dataVersion 变化就重注入整篇正文。
 // glossaryVersion：该文档所在空间的术语表集合签名——术语表改动时即便文档 mtime 没变也要重渲染。
-app.get('/api/stat', async (req) => {
-  const p = String((req.query as any)?.path || '');
-  if (!p) return { exists: false, path: p, glossaryVersion: '' };
-  const f = metaOf(p);
+// 走索引 getFileMeta（毫秒级，不读文件），`/api/status?path=` 与 `/api/stat` 共用这一份取数逻辑。
+function docStatOf(p: string) {
+  const f = p ? metaOf(p) : null;
   if (!f) return { exists: false, path: p, glossaryVersion: '' };
   return { exists: true, path: p, mtimeMs: f.mtimeMs, size: f.size, glossaryVersion: glossaryVersionForDoc(p) };
+}
+
+app.get('/api/stat', async (req) => {
+  const p = String((req.query as any)?.path || '');
+  return docStatOf(p);
 });
 
 app.get('/api/render/*', async (req, reply) => {
@@ -369,7 +373,13 @@ app.get('/api/asset/r2/*', async (req, reply) => {
 
 app.post('/api/reindex', async () => { rebuildIndex(); bumpVersion(); });
 
-app.get('/api/status', async () => ({ dataVersion }));
+// 前端唯一的常驻心跳：一次请求同时给出「数据版本」与「当前这篇文档的状态」，
+// 省掉此前 /api/status 与 /api/stat 两套并行的 5s 轮询。
+// 不带 path 时行为与旧版完全一致（部署脚本 /healthz 类的健康检查、旧前端都在用）。
+app.get('/api/status', async (req) => {
+  const p = String((req.query as any)?.path || '');
+  return p ? { dataVersion, file: docStatOf(p) } : { dataVersion };
+});
 
 app.get('/api/search-semantic', async (req) => {
   const { q = '', limit } = (req.query as any) || {};

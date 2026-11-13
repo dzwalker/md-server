@@ -179,6 +179,16 @@ export interface RawFile {
   [key: string]: unknown;
 }
 
+/** 单篇文档的轻量状态（/api/stat，也随 /api/status?path= 一起返回）：走索引，毫秒级。 */
+export interface DocStat {
+  exists: boolean;
+  path: string;
+  mtimeMs?: number;
+  size?: number;
+  /** 该文档所在空间的术语表集合签名：术语表改动时 mtime 不变也要重渲染。 */
+  glossaryVersion?: string;
+}
+
 /** POST /api/docs：整篇保存正文（content 是编辑器里的全文源码，mtimeMs 是乐观锁）。 */
 export interface DocSaveRequest {
   path: string;
