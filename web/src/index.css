@@ -585,7 +585,16 @@
    视觉原则：块本身不加边框（渲染态尽量与预览页一致），只有悬停/编辑中的块才浮出底
    与左侧强调条；源码框用等宽字体 + 代码底色，与渲染内容一眼可分。 */
 .md-editor { color: var(--md-fg, var(--foreground)); }
+.md-editor-error {
+  border-color: color-mix(in srgb, var(--destructive) 45%, transparent);
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+  color: var(--destructive);
+}
 .md-editor-conflict {
+  /* 常驻提示：吸顶显示，长文档滚到中间保存失败时也能看见 */
+  position: sticky;
+  top: 0;
+  z-index: 5;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
